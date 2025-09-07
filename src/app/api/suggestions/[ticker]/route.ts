@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { addDays, differenceInDays, parseISO, closestTo } from 'date-fns';
 
+// Define the structure of the snapshot object from Alpaca API
+interface Snapshot {
+  latestQuote: {
+    ap: number;
+    bp: number;
+  };
+  greeks: {
+    delta: number;
+  };
+  [key: string]: any; // Allow additional properties
+}
+
 const ALPACA_DATA_BASE = 'https://data.alpaca.markets/v1beta1';
 
 async function getOptionChain(ticker: string) {
@@ -18,19 +30,19 @@ async function getOptionChain(ticker: string) {
     }
     const res = await axios.get(`${ALPACA_DATA_BASE}/options/snapshots/${ticker}`, {
       headers: {
-        'Apca-Api-Key-Id': process.env.ALPACA_API_KEY_ID,
+        'Apca-Api-Key-Id': process.env.ALPACA_API_KEY_ID, // Updated to non-NEXT_PUBLIC
         'Apca-Api-Secret-Key': process.env.ALPACA_SECRET_KEY,
       },
       params,
     });
-    const snapshotsWithSymbolAndStrike = Object.entries(res.data.snapshots).map(([symbol, snapshot]) => {
-        const strikePart = symbol.slice(-8);
-        const strike_price = parseInt(strikePart, 10) / 1000;
-        return {
-            ...snapshot,
-            symbol,
-            strike_price,
-        };
+    const snapshotsWithSymbolAndStrike = Object.entries(res.data.snapshots as Record<string, Snapshot>).map(([symbol, snapshot]) => {
+      const strikePart = symbol.slice(-8);
+      const strike_price = parseInt(strikePart, 10) / 1000;
+      return {
+        ...snapshot, // Now TypeScript knows snapshot is an object
+        symbol,
+        strike_price,
+      };
     });
     allSnapshots = allSnapshots.concat(snapshotsWithSymbolAndStrike);
     next_page_token = res.data.next_page_token;
@@ -44,17 +56,17 @@ async function getUnderlyingPrice(ticker: string) {
   const res = await axios.get(`https://data.alpaca.markets/v2/stocks/${ticker}/trades/latest`, {
     headers: {
       'Apca-Api-Key-Id': process.env.ALPACA_API_KEY_ID,
-      'Apca-Api-Secret-Key': process.env.ALPACA_SECRET_KEY
+      'Apca-Api-Secret-Key': process.env.ALPACA_SECRET_KEY,
     },
   });
   return res.data.trade.p;
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ ticker: string }> }) {
-  const params = await context.params; // Await the params promise here
+  const params = await context.params; // Await params as per previous fix
   const ticker = params.ticker.toUpperCase();
 
-  if (!process.env.NEXT_PUBLIC_ALPACA_API_KEY_ID || !process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY) {
+  if (!process.env.ALPACA_API_KEY_ID || !process.env.ALPACA_SECRET_KEY) {
     return NextResponse.json(
       { error: 'Alpaca API keys are not configured. Please set the ALPACA_API_KEY_ID and ALPACA_SECRET_KEY environment variables.' },
       { status: 500 }
@@ -74,11 +86,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
     }
 
     const getExpirationFromSymbol = (symbol: string) => {
-        const datePart = symbol.substring(ticker.length, ticker.length + 6);
-        const year = `20${datePart.substring(0, 2)}`;
-        const month = datePart.substring(2, 4);
-        const day = datePart.substring(4, 6);
-        return `${year}-${month}-${day}`;
+      const datePart = symbol.substring(ticker.length, ticker.length + 6);
+      const year = `20${datePart.substring(0, 2)}`;
+      const month = datePart.substring(2, 4);
+      const day = datePart.substring(4, 6);
+      return `${year}-${month}-${day}`;
     };
 
     const today = new Date();
