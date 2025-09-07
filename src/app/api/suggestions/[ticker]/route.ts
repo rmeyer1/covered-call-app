@@ -18,8 +18,8 @@ async function getOptionChain(ticker: string) {
     }
     const res = await axios.get(`${ALPACA_DATA_BASE}/options/snapshots/${ticker}`, {
       headers: {
-        'Apca-Api-Key-Id': process.env.NEXT_PUBLIC_ALPACA_API_KEY_ID,
-        'Apca-Api-Secret-Key': process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY,
+        'Apca-Api-Key-Id': process.env.ALPACA_API_KEY_ID,
+        'Apca-Api-Secret-Key': process.env.ALPACA_SECRET_KEY,
       },
       params,
     });
@@ -43,14 +43,15 @@ async function getOptionChain(ticker: string) {
 async function getUnderlyingPrice(ticker: string) {
   const res = await axios.get(`https://data.alpaca.markets/v2/stocks/${ticker}/trades/latest`, {
     headers: {
-      'Apca-Api-Key-Id': process.env.NEXT_PUBLIC_ALPACA_API_KEY_ID,
-      'Apca-Api-Secret-Key': process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY
+      'Apca-Api-Key-Id': process.env.ALPACA_API_KEY_ID,
+      'Apca-Api-Secret-Key': process.env.ALPACA_SECRET_KEY
     },
   });
   return res.data.trade.p;
 }
 
-export async function GET(req: NextRequest, { params }: { params: { ticker: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ ticker: string }> }) {
+  const params = await context.params; // Await the params promise here
   const ticker = params.ticker.toUpperCase();
 
   if (!process.env.NEXT_PUBLIC_ALPACA_API_KEY_ID || !process.env.NEXT_PUBLIC_ALPACA_SECRET_KEY) {
