@@ -6,7 +6,11 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "mcp:playwright": "npx -y github:microsoft/playwright-mcp -- --browser=chromium --headless --baseURL=http://localhost:3000",
+    "browsertools:server": "npx -y @agentdeskai/browser-tools-server",
+    "mcp:browsertools": "npx -y @agentdeskai/browser-tools-mcp"
   },
   "dependencies": {
     "axios": "^1.11.0",
@@ -18,6 +22,7 @@
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.47.0",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -25,6 +30,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.2",
+    "playwright": "^1.47.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

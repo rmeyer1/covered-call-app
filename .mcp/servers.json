@@ -1,0 +1,22 @@
+{
+  "playwright": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@microsoft/playwright-mcp",
+      "--",
+      "--browser=chromium",
+      "--headless",
+      "--baseURL=http://localhost:3000"
+    ],
+    "env": {}
+  },
+  "browsertools": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@agentdeskai/browser-tools-mcp"
+    ],
+    "env": {}
+  }
+}

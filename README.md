@@ -34,3 +34,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Playwright UI Testing and MCP Server
+
+This repo includes Playwright for E2E tests and a Playwright MCP server for agent-driven UI testing.
+
+- Install deps and browsers: `npm ci && npx playwright install`
+- Run tests: `npm run test:e2e`
+- Start MCP server: `npm run mcp:playwright`
+
+Notes
+- MCP client config lives at `.mcp/servers.json` (server key: `playwright`).
+- The server targets `http://localhost:3000`. Ensure `npm run dev` is running or adjust the `--baseURL` flag.
