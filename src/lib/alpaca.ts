@@ -11,11 +11,15 @@ export function getAlpacaAuth() {
 }
 
 export async function getOptionChain(ticker: string) {
+  return getOptionChainByType(ticker, 'call');
+}
+
+export async function getOptionChainByType(ticker: string, type: 'call' | 'put') {
   let allSnapshots: any[] = [];
   let next_page_token: string | null = null;
 
   do {
-    const params = new URLSearchParams({ type: 'call', limit: '1000' });
+    const params = new URLSearchParams({ type, limit: '1000' });
     if (next_page_token) params.append('page_token', next_page_token);
     let res;
     try {
@@ -74,4 +78,3 @@ export async function getUnderlyingPrice(ticker: string) {
     throw err;
   }
 }
-

@@ -54,23 +54,38 @@ export default function SuggestionsTable({ currentPrice, suggestions, showThetaB
         <table className="min-w-full text-xs sm:text-sm text-left text-gray-500 dark:text-gray-400">
           <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
             <tr>
-              <th className="px-4 sm:px-6 py-3 cursor-pointer" onClick={() => requestSort('otmPercent')}>OTM %</th>
-              <th className="px-4 sm:px-6 py-3 cursor-pointer" onClick={() => requestSort('strike')}>Strike</th>
-              <th className="px-4 sm:px-6 py-3 cursor-pointer" onClick={() => requestSort('premium')}>Premium</th>
-              <th className="px-4 sm:px-6 py-3 cursor-pointer flex items-center gap-1 relative" onClick={() => requestSort('delta')} onMouseEnter={() => setShowDeltaTooltip(true)} onMouseLeave={() => setShowDeltaTooltip(false)} onFocus={() => setShowDeltaTooltip(true)} onBlur={() => setShowDeltaTooltip(false)}>
-                Delta <HelpCircle size={14} />
+              <th className="px-4 sm:px-6 py-2 sm:py-3 align-middle whitespace-nowrap cursor-pointer" onClick={() => requestSort('otmPercent')}>OTM/ITM %</th>
+              <th className="px-4 sm:px-6 py-2 sm:py-3 align-middle whitespace-nowrap cursor-pointer" onClick={() => requestSort('strike')}>Strike</th>
+              <th className="px-4 sm:px-6 py-2 sm:py-3 align-middle whitespace-nowrap cursor-pointer" onClick={() => requestSort('premium')}>Premium</th>
+              <th className="px-4 sm:px-6 py-2 sm:py-3 align-middle whitespace-nowrap cursor-pointer relative" onClick={() => requestSort('delta')}>
+                <span
+                  className="inline-flex items-center gap-1"
+                  onMouseEnter={() => setShowDeltaTooltip(true)}
+                  onMouseLeave={() => setShowDeltaTooltip(false)}
+                  onFocus={() => setShowDeltaTooltip(true)}
+                  onBlur={() => setShowDeltaTooltip(false)}
+                >
+                  Delta <HelpCircle size={14} />
+                </span>
                 {showDeltaTooltip && (
-                  <div className="absolute z-20 left-0 top-full mt-2 w-56 p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700">
+                  <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
                     Approximate probability of finishing in-the-money. Higher delta ≈ higher assignment risk.
                   </div>
                 )}
               </th>
-              {showThetaBadge && <th className="px-4 sm:px-6 py-3">θ</th>}
               {showThetaBadge && (
-                <th className="px-4 sm:px-6 py-3 relative" onMouseEnter={() => setShowThetaTooltip(true)} onMouseLeave={() => setShowThetaTooltip(false)} onFocus={() => setShowThetaTooltip(true)} onBlur={() => setShowThetaTooltip(false)}>
-                  <span className="flex items-center gap-1">θ <HelpCircle size={14} /></span>
+                <th className="px-4 sm:px-6 py-2 sm:py-3 align-middle whitespace-nowrap relative">
+                  <span
+                    className="inline-flex items-center gap-1"
+                    onMouseEnter={() => setShowThetaTooltip(true)}
+                    onMouseLeave={() => setShowThetaTooltip(false)}
+                    onFocus={() => setShowThetaTooltip(true)}
+                    onBlur={() => setShowThetaTooltip(false)}
+                  >
+                    θ <HelpCircle size={14} />
+                  </span>
                   {showThetaTooltip && (
-                    <div className="absolute z-20 left-0 top-full mt-2 w-56 p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700">
+                    <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
                       Time decay per option (per day). Negative for long calls; as a covered call seller, decay works in your favor.
                     </div>
                   )}
@@ -90,12 +105,12 @@ export default function SuggestionsTable({ currentPrice, suggestions, showThetaB
                 transition={{ duration: 0.3 }}
                 className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition duration-200"
               >
-                <td className="px-4 sm:px-6 py-4 font-medium text-gray-900 dark:text-white">{s.otmPercent}%</td>
+                <td className="px-4 sm:px-6 py-4 font-medium text-gray-900 dark:text-white">{s.otmPercent > 0 ? `+${s.otmPercent}` : s.otmPercent}%</td>
                 <td className="px-4 sm:px-6 py-4">${s.strike}</td>
                 <td className="px-4 sm:px-6 py-4">${s.premium ? s.premium.toFixed(2) : 'N/A'}</td>
                 <td className={`px-4 sm:px-6 py-4 ${s.delta > 0.3 ? 'text-yellow-500' : 'text-green-500'}`}>{s.delta ? s.delta.toFixed(4) : 'N/A'}</td>
                 {showThetaBadge && (
-                  <td className="px-4 sm:px-6 py-4">
+                  <td className="px-4 sm:px-6 py-4 whitespace-nowrap align-middle">
                     <ThetaBadge theta={s.theta} dte={s.dte} otmPercent={s.otmPercent} />
                   </td>
                 )}
@@ -117,6 +132,3 @@ export default function SuggestionsTable({ currentPrice, suggestions, showThetaB
     </div>
   );
 }
-
-
-

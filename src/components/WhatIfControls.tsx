@@ -8,10 +8,16 @@ interface Props {
 
 export default function WhatIfControls({ daysAhead, otmFactors, onChange }: Props) {
   const presetsDays = [21, 28, 35, 42];
-  const presetsOtm = [1.1, 1.15, 1.2];
+  const otmPreset = [1.1, 1.15, 1.2]; // +10%, +15%, +20%
+  const itmPreset = [0.98, 0.95, 0.9]; // -2%, -5%, -10%
 
   const setDays = (d: number) => onChange({ daysAhead: d, otmFactors });
-  const setOtm = (f: number) => onChange({ daysAhead, otmFactors: [f, ...otmFactors.filter((x) => x !== f)] });
+  const setMode = (mode: 'OTM' | 'ITM') => {
+    const next = mode === 'OTM' ? otmPreset : itmPreset;
+    onChange({ daysAhead, otmFactors: next });
+  };
+
+  const currentMode: 'OTM' | 'ITM' = (otmFactors?.[0] ?? 1.1) > 1 ? 'OTM' : 'ITM';
 
   return (
     <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -25,17 +31,23 @@ export default function WhatIfControls({ daysAhead, otmFactors, onChange }: Prop
           {d}d
         </button>
       ))}
-      <div className="ml-2 text-xs text-gray-500 dark:text-gray-400">OTM:</div>
-      {presetsOtm.map((f) => (
+
+      {/* Group Moneyness label + options so they wrap together on mobile */}
+      <div className="flex items-center gap-2 ml-2 whitespace-nowrap">
+        <div className="text-xs text-gray-500 dark:text-gray-400">Moneyness:</div>
         <button
-          key={f}
-          onClick={() => setOtm(f)}
-          className={`text-xs px-2 py-1 rounded border transition ${Math.abs(otmFactors[0] - f) < 1e-6 ? 'bg-blue-600 text-white border-blue-600' : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-400/30 hover:border-blue-500'}`}
+          onClick={() => setMode('ITM')}
+          className={`text-xs px-2 py-1 rounded border transition ${currentMode === 'ITM' ? 'bg-blue-600 text-white border-blue-600' : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-400/30 hover:border-blue-500'}`}
         >
-          +{Math.round((f - 1) * 100)}%
+          ITM
         </button>
-      ))}
+        <button
+          onClick={() => setMode('OTM')}
+          className={`text-xs px-2 py-1 rounded border transition ${currentMode === 'OTM' ? 'bg-blue-600 text-white border-blue-600' : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-400/30 hover:border-blue-500'}`}
+        >
+          OTM
+        </button>
+      </div>
     </div>
   );
 }
-

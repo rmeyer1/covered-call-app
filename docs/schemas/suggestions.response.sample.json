@@ -1,0 +1,21 @@
+{
+  "currentPrice": 184.27,
+  "selectedExpiration": "2025-10-17",
+  "suggestions": [
+    {
+      "otmPercent": 10,
+      "strike": 205,
+      "premium": 1.35,
+      "delta": 0.24,
+      "theta": -0.04,
+      "gamma": 0.01,
+      "vega": 0.12,
+      "impliedVolatility": 0.32,
+      "yieldMonthly": "0.73",
+      "yieldAnnualized": "7.62",
+      "expiration": "2025-10-17",
+      "dte": 32
+    }
+  ]
+}
+

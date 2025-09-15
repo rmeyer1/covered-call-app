@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SuggestionsResponse",
+  "type": "object",
+  "required": ["currentPrice", "selectedExpiration", "suggestions"],
+  "properties": {
+    "currentPrice": { "type": "number", "minimum": 0 },
+    "selectedExpiration": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "otmPercent",
+          "strike",
+          "premium",
+          "expiration",
+          "dte",
+          "yieldMonthly",
+          "yieldAnnualized"
+        ],
+        "properties": {
+          "otmPercent": { "type": "integer", "minimum": 0 },
+          "strike": { "type": "number", "minimum": 0 },
+          "premium": { "type": "number", "minimum": 0 },
+          "delta": { "type": ["number", "null"] },
+          "theta": { "type": ["number", "null"] },
+          "gamma": { "type": ["number", "null"] },
+          "vega": { "type": ["number", "null"] },
+          "impliedVolatility": { "type": ["number", "null"] },
+          "yieldMonthly": { "type": "string", "pattern": "^\\d+\\.\\d{2}$" },
+          "yieldAnnualized": { "type": "string", "pattern": "^\\d+\\.\\d{2}$" },
+          "expiration": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "dte": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}
+
