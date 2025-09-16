@@ -78,3 +78,14 @@ export async function getUnderlyingPrice(ticker: string) {
     throw err;
   }
 }
+
+export async function getLogoUrl(ticker: string) {
+  const publishableToken = process.env.LOGO_DEV_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_LOGO_DEV_TOKEN;
+  if (!publishableToken) {
+    logWarn('alpaca.getLogoUrl: logo.dev token missing');
+    return null;
+  }
+  const symbol = ticker.toUpperCase();
+  const url = `https://img.logo.dev/ticker/${encodeURIComponent(symbol)}?token=${publishableToken}`;
+  return url;
+}

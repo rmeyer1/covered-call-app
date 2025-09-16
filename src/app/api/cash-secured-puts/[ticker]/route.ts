@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
-import { getAlpacaAuth, getOptionChainByType, getUnderlyingPrice } from '@/lib/alpaca';
+import { getAlpacaAuth, getOptionChainByType, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
 import { nextExpirationDateForChain, callsAtExpiration, selectPutsByMoneyness, buildCspSuggestions } from '@/lib/options';
 import { logAxiosError } from '@/lib/logger';
 
@@ -21,8 +21,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   }
 
   try {
-    const currentPrice = await getUnderlyingPrice(T);
-    const chain = await getOptionChainByType(T, 'put');
+    const [currentPrice, chain, logoUrl] = await Promise.all([
+      getUnderlyingPrice(T),
+      getOptionChainByType(T, 'put'),
+      getLogoUrl(T),
+    ]);
 
     const nextExp = nextExpirationDateForChain(chain, T, Number.isFinite(daysAhead) ? daysAhead : 35);
     if (!nextExp) return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });
@@ -33,7 +36,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
     const selected = selectPutsByMoneyness(putsAtExp, currentPrice, moneyness, Math.max(1, Math.min(count, 5)));
     const suggestions = buildCspSuggestions(selected, nextExp);
 
-    return NextResponse.json({ currentPrice, selectedExpiration: nextExp.toISOString().split('T')[0], suggestions });
+    return NextResponse.json({ currentPrice, selectedExpiration: nextExp.toISOString().split('T')[0], suggestions, logoUrl: logoUrl ?? undefined });
   } catch (error: any) {
     logAxiosError(error, 'GET /api/cash-secured-puts/[ticker]');
     if (axios.isAxiosError(error) && error.response) {

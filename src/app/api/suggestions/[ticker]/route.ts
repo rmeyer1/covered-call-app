@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { logAxiosError } from '@/lib/logger';
 import { nextExpirationDateForChain, callsAtExpiration, buildSuggestions } from '@/lib/options';
-import { getAlpacaAuth, getOptionChain, getUnderlyingPrice } from '@/lib/alpaca';
+import { getAlpacaAuth, getOptionChain, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
 
 
 export async function GET(req: NextRequest, context: { params: Promise<{ ticker: string }> }) {
@@ -31,8 +31,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   }
 
   try {
-    const currentPrice = await getUnderlyingPrice(ticker);
-    const optionChain = await getOptionChain(ticker);
+    const [currentPrice, optionChain, logoUrl] = await Promise.all([
+      getUnderlyingPrice(ticker),
+      getOptionChain(ticker),
+      getLogoUrl(ticker),
+    ]);
 
     if (!optionChain || optionChain.length === 0) {
       return NextResponse.json({ error: 'Could not retrieve options chain. The ticker may be invalid or have no options.' }, { status: 404 });
@@ -56,6 +59,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
       currentPrice,
       selectedExpiration: nextExp.toISOString().split('T')[0],
       suggestions,
+      logoUrl: logoUrl ?? undefined,
     });
   } catch (error: any) {
     logAxiosError(error, 'GET /api/suggestions/[ticker]');

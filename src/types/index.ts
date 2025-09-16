@@ -22,6 +22,7 @@ export interface SuggestionsData {
   currentPrice: number;
   suggestions: Suggestion[];
   selectedExpiration?: string;
+  logoUrl?: string | null;
 }
 
 export type GetSuggestionsResponse = SuggestionsData;
@@ -48,6 +49,7 @@ export interface LongCallData {
   currentPrice: number;
   selectedExpiration: string;
   suggestions: LongCallSuggestion[];
+  logoUrl?: string | null;
 }
 
 // Cash-Secured Puts types
@@ -71,6 +73,7 @@ export interface CashSecuredPutData {
   currentPrice: number;
   selectedExpiration: string;
   suggestions: CashSecuredPutSuggestion[];
+  logoUrl?: string | null;
 }
 
 // Long Puts types
@@ -92,4 +95,5 @@ export interface LongPutData {
   currentPrice: number;
   selectedExpiration: string;
   suggestions: LongPutSuggestion[];
+  logoUrl?: string | null;
 }

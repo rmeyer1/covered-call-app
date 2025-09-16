@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 import { AnimatePresence, motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
 import SuggestionsTable from '@/components/SuggestionsTable';
@@ -18,10 +19,23 @@ interface Props {
 export default function StockCard({ stock, loading, data, onGetSuggestions, onRemove, whatIf, onWhatIfChange }: Props) {
   return (
     <div className="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-lg mb-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-        <div className="mb-4 sm:mb-0">
-          <span className="text-xl sm:text-2xl font-bold text-blue-500 dark:text-blue-400">{stock.ticker}</span>
-          <span className="text-gray-600 dark:text-gray-400 ml-2">({stock.shares} shares)</span>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+        <div className="flex items-center gap-3">
+          {data?.logoUrl && (
+            <Image
+              src={data.logoUrl}
+              alt={`${stock.ticker} logo`}
+              width={48}
+              height={48}
+              className="h-12 w-12 rounded-full border border-gray-200 bg-white object-contain p-1 dark:border-gray-700"
+              loading="lazy"
+              unoptimized
+            />
+          )}
+          <div>
+            <span className="text-xl sm:text-2xl font-bold text-blue-500 dark:text-blue-400">{stock.ticker}</span>
+            <span className="text-gray-600 dark:text-gray-400 ml-2">({stock.shares} shares)</span>
+          </div>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
           <button
@@ -56,7 +70,11 @@ export default function StockCard({ stock, loading, data, onGetSuggestions, onRe
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <SuggestionsTable currentPrice={data.currentPrice} suggestions={data.suggestions} showThetaBadge />
+            <SuggestionsTable
+              currentPrice={data.currentPrice}
+              suggestions={data.suggestions}
+              showThetaBadge
+            />
           </motion.div>
         )}
       </AnimatePresence>

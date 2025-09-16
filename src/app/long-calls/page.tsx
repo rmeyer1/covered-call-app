@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import axios from 'axios';
 import LongCallsForm from '@/components/LongCallsForm';
 import LongCallsControls from '@/components/LongCallsControls';
@@ -111,40 +112,55 @@ export default function LongCallsPage() {
       <main className="p-2 sm:p-4 md:p-8">
         <div className="max-w-5xl mx-auto">
           <LongCallsForm tickerInput={tickerInput} onTickerChange={setTickerInput} onSubmit={handleAdd} />
-          {items.map(({ ticker }) => (
-            <div key={ticker} className="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-lg mb-6">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-                <div className="mb-2 sm:mb-0">
-                  <span className="text-xl sm:text-2xl font-bold text-blue-500 dark:text-blue-400">{ticker}</span>
+          {items.map(({ ticker }) => {
+            const entry = data[ticker];
+            const logoUrl = entry?.logoUrl ?? null;
+            return (
+              <div key={ticker} className="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-lg mb-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+                  <div className="flex items-center gap-3">
+                    {logoUrl && (
+                      <Image
+                        src={logoUrl}
+                        alt={`${ticker} logo`}
+                        width={48}
+                        height={48}
+                        className="h-12 w-12 rounded-full border border-gray-200 bg-white object-contain p-1 dark:border-gray-700"
+                        loading="lazy"
+                        unoptimized
+                      />
+                    )}
+                    <div className="text-xl sm:text-2xl font-bold text-blue-500 dark:text-blue-400">{ticker}</div>
+                  </div>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={() => fetchData(ticker)}
+                      disabled={!!loading[ticker]}
+                      className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 sm:py-2 sm:px-3 rounded-md transition duration-300 disabled:bg-gray-500"
+                    >
+                      {loading[ticker] ? 'Loading...' : 'Refresh'}
+                    </button>
+                    <button
+                      onClick={() => handleRemove(ticker)}
+                      className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 sm:py-2 sm:px-3 rounded-md transition duration-300"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                  <button
-                    onClick={() => fetchData(ticker)}
-                    disabled={!!loading[ticker]}
-                    className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-2 sm:py-2 sm:px-3 rounded-md transition duration-300 disabled:bg-gray-500"
-                  >
-                    {loading[ticker] ? 'Loading...' : 'Refresh'}
-                  </button>
-                  <button
-                    onClick={() => handleRemove(ticker)}
-                    className="flex-1 sm:flex-none bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 sm:py-2 sm:px-3 rounded-md transition duration-300"
-                  >
-                    Remove
-                  </button>
-                </div>
+
+                <LongCallsControls
+                  daysAhead={(prefs[ticker]?.daysAhead ?? 45)}
+                  moneyness={(prefs[ticker]?.moneyness ?? 'ATM') as Moneyness}
+                  onChange={(next) => handlePrefsChange(ticker, next)}
+                />
+
+                {data[ticker] && (
+                  <LongCallsTable currentPrice={data[ticker].currentPrice} suggestions={data[ticker].suggestions} />
+                )}
               </div>
-
-              <LongCallsControls
-                daysAhead={(prefs[ticker]?.daysAhead ?? 45)}
-                moneyness={(prefs[ticker]?.moneyness ?? 'ATM') as Moneyness}
-                onChange={(next) => handlePrefsChange(ticker, next)}
-              />
-
-              {data[ticker] && (
-                <LongCallsTable currentPrice={data[ticker].currentPrice} suggestions={data[ticker].suggestions} />)
-              }
-            </div>
-          ))}
+            );
+          })}
         </div>
       </main>
     </div>

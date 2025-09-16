@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { logAxiosError } from '@/lib/logger';
-import { getAlpacaAuth, getOptionChain, getUnderlyingPrice } from '@/lib/alpaca';
+import { getAlpacaAuth, getOptionChain, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
 import {
   nextExpirationDateForChain,
   callsAtExpiration,
@@ -31,8 +31,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   }
 
   try {
-    const currentPrice = await getUnderlyingPrice(ticker);
-    const optionChain = await getOptionChain(ticker);
+    const [currentPrice, optionChain, logoUrl] = await Promise.all([
+      getUnderlyingPrice(ticker),
+      getOptionChain(ticker),
+      getLogoUrl(ticker),
+    ]);
 
     if (!optionChain || optionChain.length === 0) {
       return NextResponse.json({ error: 'Could not retrieve options chain. The ticker may be invalid or have no options.' }, { status: 404 });
@@ -52,7 +55,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
     const suggestions = buildLongCallSuggestions(currentPrice, selected, nextExp);
 
     const selectedExpiration = nextExp.toISOString().split('T')[0];
-    return NextResponse.json({ currentPrice, selectedExpiration, suggestions });
+    return NextResponse.json({ currentPrice, selectedExpiration, suggestions, logoUrl: logoUrl ?? undefined });
   } catch (error: any) {
     logAxiosError(error, 'GET /api/long-calls/[ticker]');
     if (axios.isAxiosError(error) && error.response) {
