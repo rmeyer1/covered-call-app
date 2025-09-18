@@ -44,6 +44,7 @@ export default function Navbar() {
 
   const links = [
     { href: '/', label: 'Home' },
+    { href: '/portfolio', label: 'Portfolio' },
     { href: '/covered-calls', label: 'Covered Calls' },
     { href: '/long-calls', label: 'Long Calls' },
     { href: '/long-puts', label: 'Long Puts' },

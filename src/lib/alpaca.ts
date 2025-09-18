@@ -1,8 +1,17 @@
 import axios from 'axios';
+import type {
+  AlpacaStockSnapshot,
+  AlpacaOptionsSnapshotResponse,
+  AlpacaOptionsSnapshot,
+  AlpacaNewsResponse,
+  AlpacaBarResponse,
+  AlpacaBar,
+} from '@/types/alpaca';
 import { logAxiosError, logWarn, logDebug } from '@/lib/logger';
 import { mapSnapshotsWithStrike } from '@/lib/options';
 
-const ALPACA_DATA_BASE = 'https://data.alpaca.markets/v1beta1';
+const ALPACA_DATA_BASE_V1BETA1 = 'https://data.alpaca.markets/v1beta1';
+const ALPACA_DATA_BASE_V2 = 'https://data.alpaca.markets/v2';
 
 export function getAlpacaAuth() {
   const keyId = process.env.ALPACA_API_KEY_ID;
@@ -10,12 +19,92 @@ export function getAlpacaAuth() {
   return { keyId, secretKey };
 }
 
+function buildAuthHeaders() {
+  const { keyId, secretKey } = getAlpacaAuth();
+  if (!keyId || !secretKey) {
+    throw new Error('Alpaca API credentials are not configured');
+  }
+  return {
+    'Apca-Api-Key-Id': keyId,
+    'Apca-Api-Secret-Key': secretKey,
+  };
+}
+
+async function get<T>(url: string, params?: Record<string, unknown>): Promise<T> {
+  try {
+    const headers = buildAuthHeaders();
+    const { data } = await axios.get<T>(url, { headers, params });
+    return data;
+  } catch (err) {
+    logAxiosError(err, 'alpaca.get');
+    throw err;
+  }
+}
+
+export async function getStockSnapshot(symbol: string) {
+  const data = await get<{ snapshot: AlpacaStockSnapshot }>(
+    `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/snapshot`
+  );
+  return data?.snapshot;
+}
+
+export async function getDailyBars(symbol: string, limit = 252) {
+  const bars: AlpacaBar[] = [];
+  let nextPageToken: string | null | undefined;
+
+  do {
+    const params: Record<string, unknown> = {
+      timeframe: '1Day',
+      limit,
+    };
+    if (nextPageToken) params.page_token = nextPageToken;
+
+    const data = await get<AlpacaBarResponse>(
+      `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/bars`,
+      params
+    );
+    if (Array.isArray(data?.bars)) {
+      bars.push(...data.bars);
+    }
+    nextPageToken = data?.next_page_token;
+  } while (nextPageToken && bars.length < limit);
+
+  return bars.slice(0, limit);
+}
+
+export async function getOptionsSnapshot(symbol: string): Promise<AlpacaOptionsSnapshot | undefined> {
+  try {
+    const response = await get<AlpacaOptionsSnapshotResponse>(
+      `${ALPACA_DATA_BASE_V1BETA1}/options/snapshots/${encodeURIComponent(symbol)}`
+    );
+    const snapshots = response?.snapshots ?? {};
+    const firstKey = Object.keys(snapshots)[0];
+    return firstKey ? (snapshots[firstKey] as AlpacaOptionsSnapshot) : undefined;
+  } catch (err) {
+    logAxiosError(err, 'alpaca.getOptionsSnapshot');
+    return undefined;
+  }
+}
+
+export async function getNews(symbol: string, limit = 5) {
+  try {
+    const data = await get<AlpacaNewsResponse>(`${ALPACA_DATA_BASE_V1BETA1}/news`, {
+      symbols: symbol,
+      limit,
+    });
+    return Array.isArray(data?.news) ? data.news : [];
+  } catch (err) {
+    logAxiosError(err, 'alpaca.getNews');
+    return [];
+  }
+}
+
 export async function getOptionChain(ticker: string) {
   return getOptionChainByType(ticker, 'call');
 }
 
 export async function getOptionChainByType(ticker: string, type: 'call' | 'put') {
-  let allSnapshots: any[] = [];
+  let allSnapshots: Record<string, unknown>[] = [];
   let next_page_token: string | null = null;
 
   do {
@@ -24,7 +113,7 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
     let res;
     try {
       const { keyId, secretKey } = getAlpacaAuth();
-      res = await axios.get(`${ALPACA_DATA_BASE}/options/snapshots/${ticker}`, {
+      res = await axios.get(`${ALPACA_DATA_BASE_V1BETA1}/options/snapshots/${ticker}`, {
         headers: {
           'Apca-Api-Key-Id': keyId,
           'Apca-Api-Secret-Key': secretKey,
@@ -36,7 +125,7 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
       throw err;
     }
 
-    const snapshots = res?.data?.snapshots as Record<string, any> | undefined;
+    const snapshots = res?.data?.snapshots as Record<string, unknown> | undefined;
     if (!snapshots || Object.keys(snapshots).length === 0) {
       logWarn('alpaca.getOptionChain: no snapshots', {
         ticker,
@@ -58,7 +147,7 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
 export async function getUnderlyingPrice(ticker: string) {
   try {
     const { keyId, secretKey } = getAlpacaAuth();
-    const res = await axios.get(`https://data.alpaca.markets/v2/stocks/${ticker}/trades/latest`, {
+    const res = await axios.get(`${ALPACA_DATA_BASE_V2}/stocks/${ticker}/trades/latest`, {
       headers: {
         'Apca-Api-Key-Id': keyId,
         'Apca-Api-Secret-Key': secretKey,

@@ -68,6 +68,11 @@ export interface ParagraphInfo {
     boundingBox?: BoundingPoly;
     confidence?: number;
   }>;
+  tokens: Array<{
+    text: string;
+    boundingBox?: BoundingPoly;
+    confidence?: number;
+  }>;
 }
 
 export interface VisionAnalysisResult {
@@ -114,11 +119,25 @@ function buildParagraphInfo(paragraph: VisionParagraph): ParagraphInfo {
     confidence: word.confidence,
   })).filter((word) => word.text.length);
   const text = words.map((w) => w.text).join(' ').replace(/\s+/g, ' ').trim();
+  const tokens = words
+    .flatMap((word) =>
+      word.text
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .map((token) => ({
+          text: token,
+          boundingBox: word.boundingBox,
+          confidence: word.confidence ?? paragraph.confidence,
+        }))
+    )
+    .filter((token) => token.text.length);
   return {
     text,
     boundingBox: paragraph.boundingBox,
     confidence: paragraph.confidence,
     words,
+    tokens,
   };
 }
 
@@ -151,8 +170,11 @@ export async function analyzeImageWithVision({
   const request = {
     requests: [
       {
-        features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION', model: 'builtin/latest' as const }],
         image: base64 ? { content: normalizeBase64(base64) } : { source: { imageUri } },
+        imageContext: {
+          languageHints: ['en'],
+        },
       },
     ],
   };
