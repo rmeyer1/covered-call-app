@@ -6,7 +6,8 @@ import axios from 'axios';
 import LongCallsForm from '@/components/LongCallsForm';
 import LongCallsControls from '@/components/LongCallsControls';
 import LongCallsTable from '@/components/LongCallsTable';
-import type { LongCallData } from '@/types';
+import { DEFAULT_EXPIRY_SELECTION, deriveSelectionFromDays, normalizeExpirySelection, selectionToQueryParams } from '@/lib/expirations';
+import type { ExpirySelection, LongCallData } from '@/types';
 
 type Moneyness = 'ITM' | 'ATM' | 'OTM';
 
@@ -14,19 +15,45 @@ interface Tracked {
   ticker: string;
 }
 
+type PrefState = { expiry: ExpirySelection; moneyness: Moneyness };
+
+const createDefaultPref = (): PrefState => ({
+  expiry: { ...DEFAULT_EXPIRY_SELECTION },
+  moneyness: 'ATM',
+});
+
+const parsePrefsStorage = (raw: unknown): Record<string, PrefState> => {
+  if (!raw || typeof raw !== 'object') return {};
+  return Object.entries(raw as Record<string, unknown>).reduce<Record<string, PrefState>>((acc, [ticker, value]) => {
+    if (!value || typeof value !== 'object') return acc;
+    const entry = value as { expiry?: ExpirySelection; daysAhead?: number; moneyness?: unknown };
+    const expiry = entry.expiry
+      ? { ...normalizeExpirySelection(entry.expiry, DEFAULT_EXPIRY_SELECTION) }
+      : typeof entry.daysAhead === 'number'
+        ? { ...deriveSelectionFromDays(entry.daysAhead) }
+        : { ...DEFAULT_EXPIRY_SELECTION };
+    const m = typeof entry.moneyness === 'string' ? entry.moneyness.toUpperCase() : null;
+    acc[ticker] = {
+      expiry,
+      moneyness: (m === 'ITM' || m === 'ATM' || m === 'OTM') ? (m as Moneyness) : 'ATM',
+    };
+    return acc;
+  }, {});
+};
+
 export default function LongCallsPage() {
   const [items, setItems] = useState<Tracked[]>([]);
   const [data, setData] = useState<Record<string, LongCallData>>({});
   const [tickerInput, setTickerInput] = useState('');
   const [loading, setLoading] = useState<Record<string, boolean>>({});
-  const [prefs, setPrefs] = useState<Record<string, { daysAhead: number; moneyness: Moneyness }>>({});
+  const [prefs, setPrefs] = useState<Record<string, PrefState>>({});
   const debounceTimers = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('longcalls.items') || '[]');
     const savedPrefs = JSON.parse(localStorage.getItem('longcalls.prefs') || '{}');
     setItems(saved);
-    if (savedPrefs && typeof savedPrefs === 'object') setPrefs(savedPrefs);
+    setPrefs(parsePrefsStorage(savedPrefs));
   }, []);
 
   useEffect(() => {
@@ -61,18 +88,20 @@ export default function LongCallsPage() {
       return copy;
     });
     setPrefs((p) => {
-      const copy = { ...p } as Record<string, { daysAhead: number; moneyness: Moneyness }>;
+      const copy = { ...p } as Record<string, PrefState>;
       delete copy[ticker];
       localStorage.setItem('longcalls.prefs', JSON.stringify(copy));
       return copy;
     });
   };
 
-  const fetchData = async (ticker: string, override?: { daysAhead: number; moneyness: Moneyness }) => {
+  const fetchData = async (ticker: string, override?: PrefState) => {
     setLoading((l) => ({ ...l, [ticker]: true }));
     try {
-      const pref = override || prefs[ticker] || { daysAhead: 45, moneyness: 'ATM' as Moneyness };
-      const params = new URLSearchParams({ daysAhead: String(pref.daysAhead), moneyness: pref.moneyness });
+      const pref = override || prefs[ticker] || createDefaultPref();
+      const query = selectionToQueryParams(pref.expiry);
+      query.moneyness = pref.moneyness;
+      const params = new URLSearchParams(query);
       const res = await axios.get(`/api/long-calls/${ticker}?${params.toString()}`);
       setData((d) => ({ ...d, [ticker]: res.data }));
     } catch (err) {
@@ -83,16 +112,20 @@ export default function LongCallsPage() {
     }
   };
 
-  const handlePrefsChange = (ticker: string, next: { daysAhead: number; moneyness: Moneyness }) => {
+  const handlePrefsChange = (ticker: string, next: PrefState) => {
+    const payload: PrefState = {
+      expiry: { ...next.expiry },
+      moneyness: next.moneyness,
+    };
     setPrefs((p) => {
-      const copy = { ...p, [ticker]: next };
+      const copy = { ...p, [ticker]: payload };
       localStorage.setItem('longcalls.prefs', JSON.stringify(copy));
       return copy;
     });
     const existing = debounceTimers.current[ticker];
     if (existing) clearTimeout(existing);
     debounceTimers.current[ticker] = window.setTimeout(() => {
-      fetchData(ticker, next);
+      fetchData(ticker, payload);
       delete debounceTimers.current[ticker];
     }, 250);
   };
@@ -115,6 +148,7 @@ export default function LongCallsPage() {
           {items.map(({ ticker }) => {
             const entry = data[ticker];
             const logoUrl = entry?.logoUrl ?? null;
+            const pref = prefs[ticker] ?? createDefaultPref();
             return (
               <div key={ticker} className="bg-white dark:bg-gray-800 p-4 sm:p-6 rounded-lg shadow-lg mb-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
@@ -150,8 +184,8 @@ export default function LongCallsPage() {
                 </div>
 
                 <LongCallsControls
-                  daysAhead={(prefs[ticker]?.daysAhead ?? 45)}
-                  moneyness={(prefs[ticker]?.moneyness ?? 'ATM') as Moneyness}
+                  expiry={pref.expiry}
+                  moneyness={pref.moneyness}
                   onChange={(next) => handlePrefsChange(ticker, next)}
                 />
 

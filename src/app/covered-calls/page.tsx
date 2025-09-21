@@ -6,7 +6,43 @@ import { logError } from '@/lib/logger';
 import { motion, AnimatePresence } from 'framer-motion';
 import StockForm from '@/components/StockForm';
 import StockCard from '@/components/StockCard';
-import type { Stock, SuggestionsData } from '@/types';
+import { DEFAULT_EXPIRY_SELECTION, deriveSelectionFromDays, normalizeExpirySelection, selectionToQueryParams } from '@/lib/expirations';
+import type { Stock, SuggestionsData, ExpirySelection } from '@/types';
+
+type WhatIfState = { expiry: ExpirySelection; otmFactors: number[] };
+
+const DEFAULT_OTM_FACTORS = [1.1, 1.15, 1.2] as const;
+
+const createDefaultWhatIf = (): WhatIfState => ({
+  expiry: { ...DEFAULT_EXPIRY_SELECTION },
+  otmFactors: [...DEFAULT_OTM_FACTORS],
+});
+
+const parseWhatIfStorage = (raw: unknown): Record<string, WhatIfState> => {
+  if (!raw || typeof raw !== 'object') return {};
+  return Object.entries(raw as Record<string, unknown>).reduce<Record<string, WhatIfState>>((acc, [ticker, value]) => {
+    if (!value || typeof value !== 'object') return acc;
+    const entry = value as {
+      expiry?: ExpirySelection;
+      daysAhead?: number;
+      otmFactors?: unknown;
+    };
+    const expiry = entry.expiry
+      ? { ...normalizeExpirySelection(entry.expiry, DEFAULT_EXPIRY_SELECTION) }
+      : typeof entry.daysAhead === 'number'
+        ? { ...deriveSelectionFromDays(entry.daysAhead) }
+        : { ...DEFAULT_EXPIRY_SELECTION };
+    const factorsSource = Array.isArray(entry.otmFactors) ? entry.otmFactors : [];
+    const factors = factorsSource
+      .map((factor) => (typeof factor === 'number' ? factor : Number(factor)))
+      .filter((factor): factor is number => Number.isFinite(factor) && factor > 0);
+    acc[ticker] = {
+      expiry,
+      otmFactors: factors.length ? factors : [...DEFAULT_OTM_FACTORS],
+    };
+    return acc;
+  }, {});
+};
 
 export default function CoveredCallsPage() {
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -14,16 +50,14 @@ export default function CoveredCallsPage() {
   const [tickerInput, setTickerInput] = useState('');
   const [sharesInput, setSharesInput] = useState('');
   const [loading, setLoading] = useState<Record<string, boolean>>({});
-  const [whatIf, setWhatIf] = useState<Record<string, { daysAhead: number; otmFactors: number[] }>>({});
+  const [whatIf, setWhatIf] = useState<Record<string, WhatIfState>>({});
   const debounceTimers = useRef<Record<string, number>>({});
 
   useEffect(() => {
     const savedStocks = JSON.parse(localStorage.getItem('stocks') || '[]');
     setStocks(savedStocks);
     const savedWhatIf = JSON.parse(localStorage.getItem('whatIf') || '{}');
-    if (savedWhatIf && typeof savedWhatIf === 'object') {
-      setWhatIf(savedWhatIf);
-    }
+    setWhatIf(parseWhatIfStorage(savedWhatIf));
   }, []);
 
   // Clear any pending debounce timers on unmount
@@ -41,7 +75,7 @@ export default function CoveredCallsPage() {
       const hasData = !!suggestions[ticker];
       const isLoading = !!loading[ticker];
       if (!hasData && !isLoading) {
-        const wi = whatIf[ticker] || { daysAhead: 35, otmFactors: [1.1, 1.15, 1.2] };
+        const wi = whatIf[ticker] || createDefaultWhatIf();
         handleGetSuggestions(ticker, wi);
       }
     });
@@ -75,18 +109,20 @@ export default function CoveredCallsPage() {
     setSuggestions(newSuggestions);
     // Clear persisted what-if options for removed ticker
     setWhatIf(prev => {
-      const next = { ...prev } as Record<string, { daysAhead: number; otmFactors: number[] }>;
+      const next = { ...prev } as Record<string, WhatIfState>;
       delete next[tickerToRemove];
       localStorage.setItem('whatIf', JSON.stringify(next));
       return next;
     });
   };
 
-  const handleGetSuggestions = async (ticker: string, override?: { daysAhead: number; otmFactors: number[] }) => {
+  const handleGetSuggestions = async (ticker: string, override?: WhatIfState) => {
     setLoading(prev => ({ ...prev, [ticker]: true }));
     try {
-      const wi = override || whatIf[ticker] || { daysAhead: 35, otmFactors: [1.1, 1.15, 1.2] };
-      const params = new URLSearchParams({ daysAhead: String(wi.daysAhead), otmFactors: wi.otmFactors.join(',') });
+      const wi = override || whatIf[ticker] || createDefaultWhatIf();
+      const query = selectionToQueryParams(wi.expiry);
+      query.otmFactors = wi.otmFactors.join(',');
+      const params = new URLSearchParams(query);
       const response = await axios.get(`/api/suggestions/${ticker}?${params.toString()}`);
       setSuggestions(prev => ({ ...prev, [ticker]: response.data }));
     } catch (error) {
@@ -114,9 +150,13 @@ export default function CoveredCallsPage() {
     }
   };
 
-  const handleWhatIfChange = (ticker: string, next: { daysAhead: number; otmFactors: number[] }) => {
+  const handleWhatIfChange = (ticker: string, next: WhatIfState) => {
+    const payload: WhatIfState = {
+      expiry: { ...next.expiry },
+      otmFactors: [...next.otmFactors],
+    };
     setWhatIf(prev => {
-      const updated = { ...prev, [ticker]: next };
+      const updated = { ...prev, [ticker]: payload };
       localStorage.setItem('whatIf', JSON.stringify(updated));
       return updated;
     });
@@ -124,7 +164,7 @@ export default function CoveredCallsPage() {
     const existing = debounceTimers.current[ticker];
     if (existing) clearTimeout(existing);
     debounceTimers.current[ticker] = window.setTimeout(() => {
-      handleGetSuggestions(ticker, next);
+      handleGetSuggestions(ticker, payload);
       delete debounceTimers.current[ticker];
     }, 250);
   };
@@ -160,7 +200,7 @@ export default function CoveredCallsPage() {
                   data={suggestions[stock.ticker]}
                   onGetSuggestions={handleGetSuggestions}
                   onRemove={handleRemoveStock}
-                  whatIf={whatIf[stock.ticker] || { daysAhead: 35, otmFactors: [1.1, 1.15, 1.2] }}
+                  whatIf={whatIf[stock.ticker] || createDefaultWhatIf()}
                   onWhatIfChange={handleWhatIfChange}
                 />
               </motion.div>

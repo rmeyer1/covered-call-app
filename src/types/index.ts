@@ -5,6 +5,20 @@ export interface Stock {
   shares: number;
 }
 
+export type ExpiryMode = 'weekly' | 'monthly' | 'yearly' | 'custom';
+
+export interface ExpirySelection {
+  mode: ExpiryMode;
+  /**
+   * Count of interval units (weeks, months, years) to look ahead. Defaults to 1 when omitted.
+   */
+  count?: number;
+  /**
+   * Raw days-ahead fallback for "custom" selections or legacy persisted values.
+   */
+  daysAhead?: number;
+}
+
 export interface Suggestion {
   otmPercent: number;
   strike: number;

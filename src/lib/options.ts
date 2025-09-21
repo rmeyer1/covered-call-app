@@ -1,27 +1,7 @@
-import { addDays, closestTo, differenceInDays, parseISO } from 'date-fns';
+import { differenceInDays } from 'date-fns';
+import { getExpirationFromSymbol } from './expirations';
 
-export function getExpirationFromSymbol(symbol: string, ticker: string): string {
-  const datePart = symbol.substring(ticker.length, ticker.length + 6);
-  const year = `20${datePart.substring(0, 2)}`;
-  const month = datePart.substring(2, 4);
-  const day = datePart.substring(4, 6);
-  return `${year}-${month}-${day}`;
-}
-
-export function nextExpirationDateForChain(optionChain: any[], ticker: string, daysAhead = 35): Date | null {
-  const today = new Date();
-  const targetDate = addDays(today, daysAhead);
-  const expDates: Date[] = [
-    ...new Set(
-      optionChain.map((option: any) => parseISO(getExpirationFromSymbol(option.symbol, ticker)))
-    ),
-  ] as Date[];
-  const futureDates = expDates.filter((d: Date) => d > today);
-  if (!futureDates.length) return null;
-  // Choose the closest future expiration to the target date (not forcing after-only)
-  const closest = closestTo(targetDate, futureDates) as Date;
-  return closest ?? null;
-}
+export { getExpirationFromSymbol, nextExpirationDateForChain } from './expirations';
 
 export function callsAtExpiration(optionChain: any[], ticker: string, expDate: Date): any[] {
   const expStr = expDate.toISOString().split('T')[0];

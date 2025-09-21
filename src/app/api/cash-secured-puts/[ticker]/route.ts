@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { getAlpacaAuth, getOptionChainByType, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
-import { nextExpirationDateForChain, callsAtExpiration, selectPutsByMoneyness, buildCspSuggestions } from '@/lib/options';
+import { callsAtExpiration, selectPutsByMoneyness, buildCspSuggestions } from '@/lib/options';
 import { logAxiosError } from '@/lib/logger';
+import { DEFAULT_DAYS_AHEAD, parseSelectionFromParams, pickExpirationDate } from '@/lib/expirations';
 
 type Moneyness = 'OTM' | 'ITM';
 
@@ -11,7 +12,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   const { ticker } = await context.params;
   const T = ticker.toUpperCase();
   const sp = req.nextUrl.searchParams;
-  const daysAhead = Number(sp.get('daysAhead') ?? '35');
+  const requestedDaysAhead = Number(sp.get('daysAhead') ?? DEFAULT_DAYS_AHEAD);
+  const fallbackDaysAhead = Number.isFinite(requestedDaysAhead) && requestedDaysAhead > 0
+    ? requestedDaysAhead
+    : DEFAULT_DAYS_AHEAD;
+  const expirySelection = parseSelectionFromParams(sp, { mode: 'custom', daysAhead: fallbackDaysAhead });
   const moneyness = (sp.get('moneyness')?.toUpperCase() as Moneyness) || 'OTM';
   const count = Number(sp.get('count') ?? '3');
 
@@ -27,7 +32,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
       getLogoUrl(T),
     ]);
 
-    const nextExp = nextExpirationDateForChain(chain, T, Number.isFinite(daysAhead) ? daysAhead : 35);
+    const nextExp = pickExpirationDate(chain, T, expirySelection, fallbackDaysAhead);
     if (!nextExp) return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });
 
     const putsAtExp = callsAtExpiration(chain, T, nextExp); // works for both calls and puts

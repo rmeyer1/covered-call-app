@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { TrendingUp } from 'lucide-react';
 import SuggestionsTable from '@/components/SuggestionsTable';
 import WhatIfControls from '@/components/WhatIfControls';
-import type { Stock, SuggestionsData } from '@/types';
+import type { Stock, SuggestionsData, ExpirySelection } from '@/types';
 
 interface Props {
   stock: Stock;
@@ -12,8 +12,8 @@ interface Props {
   data?: SuggestionsData;
   onGetSuggestions: (ticker: string) => void;
   onRemove: (ticker: string) => void;
-  whatIf?: { daysAhead: number; otmFactors: number[] };
-  onWhatIfChange?: (ticker: string, next: { daysAhead: number; otmFactors: number[] }) => void;
+  whatIf?: { expiry: ExpirySelection; otmFactors: number[] };
+  onWhatIfChange?: (ticker: string, next: { expiry: ExpirySelection; otmFactors: number[] }) => void;
 }
 
 export default function StockCard({ stock, loading, data, onGetSuggestions, onRemove, whatIf, onWhatIfChange }: Props) {
@@ -56,7 +56,7 @@ export default function StockCard({ stock, loading, data, onGetSuggestions, onRe
 
       {onWhatIfChange && whatIf && (
         <WhatIfControls
-          daysAhead={whatIf.daysAhead}
+          expiry={whatIf.expiry}
           otmFactors={whatIf.otmFactors}
           onChange={(next) => onWhatIfChange(stock.ticker, next)}
         />

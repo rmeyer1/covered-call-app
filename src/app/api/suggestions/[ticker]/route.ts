@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { logAxiosError } from '@/lib/logger';
-import { nextExpirationDateForChain, callsAtExpiration, buildSuggestions } from '@/lib/options';
+import { callsAtExpiration, buildSuggestions } from '@/lib/options';
+import { DEFAULT_DAYS_AHEAD, parseSelectionFromParams, pickExpirationDate } from '@/lib/expirations';
 import { getAlpacaAuth, getOptionChain, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
 
 
@@ -11,7 +12,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
 
   // Parse query params for what-if controls
   const sp = req.nextUrl.searchParams;
-  const daysAhead = Number(sp.get('daysAhead') ?? '35');
+  const requestedDaysAhead = Number(sp.get('daysAhead') ?? DEFAULT_DAYS_AHEAD);
+  const fallbackDaysAhead = Number.isFinite(requestedDaysAhead) && requestedDaysAhead > 0
+    ? requestedDaysAhead
+    : DEFAULT_DAYS_AHEAD;
+  const expirySelection = parseSelectionFromParams(sp, { mode: 'custom', daysAhead: fallbackDaysAhead });
   const otmFactorsParam = sp.get('otmFactors') ?? '1.1,1.15,1.2';
   const otmFactors = otmFactorsParam
     .split(',')
@@ -41,7 +46,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
       return NextResponse.json({ error: 'Could not retrieve options chain. The ticker may be invalid or have no options.' }, { status: 404 });
     }
 
-    const nextExp = nextExpirationDateForChain(optionChain, ticker, Number.isFinite(daysAhead) ? daysAhead : 35);
+    const nextExp = pickExpirationDate(optionChain, ticker, expirySelection, fallbackDaysAhead);
 
     if (!nextExp) {
       return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });

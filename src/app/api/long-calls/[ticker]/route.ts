@@ -3,18 +3,23 @@ import axios from 'axios';
 import { logAxiosError } from '@/lib/logger';
 import { getAlpacaAuth, getOptionChain, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
 import {
-  nextExpirationDateForChain,
   callsAtExpiration,
   selectCallsByMoneyness,
   buildLongCallSuggestions,
   Moneyness,
 } from '@/lib/options';
+import { parseSelectionFromParams, pickExpirationDate } from '@/lib/expirations';
 
 export async function GET(req: NextRequest, context: { params: Promise<{ ticker: string }> }) {
   const params = await context.params;
   const ticker = params.ticker.toUpperCase();
   const sp = req.nextUrl.searchParams;
-  const daysAhead = Number(sp.get('daysAhead') ?? '45');
+  const defaultDaysAhead = 45;
+  const requestedDaysAhead = Number(sp.get('daysAhead') ?? defaultDaysAhead);
+  const fallbackDaysAhead = Number.isFinite(requestedDaysAhead) && requestedDaysAhead > 0
+    ? requestedDaysAhead
+    : defaultDaysAhead;
+  const expirySelection = parseSelectionFromParams(sp, { mode: 'custom', daysAhead: fallbackDaysAhead });
   const moneyness = (sp.get('moneyness')?.toUpperCase() as Moneyness) || 'ATM';
   const count = Number(sp.get('count') ?? '3');
 
@@ -41,7 +46,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
       return NextResponse.json({ error: 'Could not retrieve options chain. The ticker may be invalid or have no options.' }, { status: 404 });
     }
 
-    const nextExp = nextExpirationDateForChain(optionChain, ticker, Number.isFinite(daysAhead) ? daysAhead : 45);
+    const nextExp = pickExpirationDate(optionChain, ticker, expirySelection, fallbackDaysAhead);
     if (!nextExp) {
       return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });
     }
