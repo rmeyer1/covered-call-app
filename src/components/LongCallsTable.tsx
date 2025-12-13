@@ -5,6 +5,8 @@ import { HelpCircle } from 'lucide-react';
 
 type SortKey = 'strike' | 'premium' | 'delta' | 'breakeven' | 'dte';
 
+type Row = LongCallSuggestion & { ivPct: number | null };
+
 interface Props {
   currentPrice: number;
   suggestions: LongCallSuggestion[];
@@ -18,7 +20,7 @@ export default function LongCallsTable({ currentPrice, suggestions }: Props) {
   const [showExtrinsicTip, setShowExtrinsicTip] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'ascending' | 'descending' }>({ key: 'strike', direction: 'descending' });
 
-  const rows = useMemo(() => suggestions.map((s) => ({
+  const rows: Row[] = useMemo(() => suggestions.map((s) => ({
     ...s,
     ivPct: typeof s.impliedVolatility === 'number' ? s.impliedVolatility * 100 : null,
   })), [suggestions]);
@@ -26,10 +28,10 @@ export default function LongCallsTable({ currentPrice, suggestions }: Props) {
   const sortedRows = useMemo(() => {
     const copy = [...rows];
     const { key, direction } = sortConfig;
-    copy.sort((a: any, b: any) => {
+    copy.sort((a, b) => {
       const av = Number(a[key]);
       const bv = Number(b[key]);
-      if (isNaN(av) || isNaN(bv)) return 0;
+      if (Number.isNaN(av) || Number.isNaN(bv)) return 0;
       if (av < bv) return direction === 'ascending' ? -1 : 1;
       if (av > bv) return direction === 'ascending' ? 1 : -1;
       return 0;
@@ -125,30 +127,33 @@ export default function LongCallsTable({ currentPrice, suggestions }: Props) {
                 </span>
                 {showExtrinsicTip && (
                   <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
-                    Time/volatility value: premium − intrinsic. Decays toward 0 by expiry.
+                    Time value = premium − intrinsic.
                   </div>
                 )}
               </th>
-              <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap">Breakeven</th>
-              <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap">DTE</th>
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((s, i) => (
-              <tr key={`${s.strike}-${i}`} className="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
-                <td className="px-4 sm:px-6 py-4">${s.strike}</td>
-                <td className="px-4 sm:px-6 py-4">${s.premium?.toFixed(2) ?? 'N/A'}</td>
-                <td className="px-4 sm:px-6 py-4">{typeof s.delta === 'number' ? s.delta.toFixed(4) : 'N/A'}</td>
-                <td className="px-4 sm:px-6 py-4 whitespace-nowrap align-middle">
-                  <ThetaBadge theta={s.theta ?? undefined} dte={s.dte} />
-                </td>
-                <td className="px-4 sm:px-6 py-4">{typeof s.ivPct === 'number' ? s.ivPct.toFixed(1) + '%' : 'N/A'}</td>
-                <td className="px-4 sm:px-6 py-4">${s.intrinsic.toFixed(2)}</td>
-                <td className="px-4 sm:px-6 py-4">${s.extrinsic.toFixed(2)}</td>
-                <td className="px-4 sm:px-6 py-4">${s.breakeven.toFixed(2)}</td>
-                <td className="px-4 sm:px-6 py-4">{s.dte}</td>
-              </tr>
-            ))}
+            {sortedRows.map((row) => {
+              const intrinsic = Math.max(currentPrice - row.strike, 0);
+              const extrinsic = row.premium - intrinsic;
+              return (
+                <tr key={`${row.strike}-${row.dte}`} className="border-b dark:border-gray-700">
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.strike.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.premium.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.delta?.toFixed(2) ?? '—'}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.ivPct ? `${row.ivPct.toFixed(1)}%` : '—'}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.breakeven.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.dte}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">
+                    <div className="flex items-center gap-2">
+                      <span>${extrinsic.toFixed(2)}</span>
+                      <ThetaBadge theta={row.theta ?? null} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
