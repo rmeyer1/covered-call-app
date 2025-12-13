@@ -3,24 +3,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2 } from 'lucide-react';
-import type { DraftHolding, DraftRow, PortfolioHolding, PortfolioHoldingsResponse } from '@/types';
+import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
 import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
   applyDerivedCostBasisToDrafts,
-  applyDerivedCostBasisToHoldings,
-  fetchHoldings,
   formatConfidence,
   isDraftReady,
   loadDraftsLocal,
   loadDraftsRemote,
+  mergeCostBasisFromHistory,
   mergeStocksFromDrafts,
   persistDraftsLocal,
   saveDraftsRemote,
-  calculateStatsFromHoldings,
 } from '@/lib/portfolio-drafts';
+import { usePortfolioHistory } from '@/hooks/usePortfolioHistory';
 import PortfolioDashboard from '@/components/PortfolioDashboard';
 
 type ViewMode = 'loading' | 'dashboard' | 'upload';
@@ -34,38 +33,16 @@ export default function PortfolioPage() {
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
-  const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
-  const [portfolioStats, setPortfolioStats] = useState<PortfolioHoldingsResponse['stats'] | undefined>(undefined);
-  const [holdingsLoading, setHoldingsLoading] = useState(false);
-  const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [savingHoldings, setSavingHoldings] = useState(false);
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
-
-  const refreshHoldings = useCallback(
-    async (options?: { silent?: boolean }) => {
-      if (!userId) return;
-      if (!options?.silent) setHoldingsLoading(true);
-      setHoldingsError(null);
-      try {
-        const { holdings: loadedHoldings } = await fetchHoldings(userId);
-        const hydrated = applyDerivedCostBasisToHoldings(loadedHoldings);
-        setHoldings(hydrated);
-        setPortfolioStats(calculateStatsFromHoldings(hydrated));
-        setMode((prev) => {
-          if (loadedHoldings.length) return 'dashboard';
-          if (prev === 'dashboard' || prev === 'loading') return 'upload';
-          return prev;
-        });
-      } catch (err) {
-        console.error('Failed to load holdings', err);
-        setHoldingsError(err instanceof Error ? err.message : 'Failed to load holdings');
-        setMode((prev) => (prev === 'loading' ? 'upload' : prev));
-      } finally {
-        setHoldingsLoading(false);
-      }
-    },
-    [userId]
-  );
+  const {
+    holdings,
+    stats: portfolioStats,
+    loading: holdingsLoading,
+    error: holdingsError,
+    refresh: refreshHoldings,
+    historyMap,
+  } = usePortfolioHistory(userId);
 
   const handleRefreshHoldings = useCallback(() => {
     void refreshHoldings();
@@ -84,6 +61,11 @@ export default function PortfolioPage() {
     setMode('dashboard');
     void refreshHoldings();
   }, [refreshHoldings]);
+
+  const hydrateDrafts = useCallback(
+    (incoming: DraftRow[]) => applyDerivedCostBasisToDrafts(mergeCostBasisFromHistory(incoming, holdings)),
+    [holdings]
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -107,17 +89,31 @@ export default function PortfolioPage() {
   }, [userId, refreshHoldings]);
 
   useEffect(() => {
+    if (mode === 'loading') {
+      setMode(holdings.length ? 'dashboard' : 'upload');
+    } else if (mode === 'dashboard' && holdings.length === 0) {
+      setMode('upload');
+    }
+  }, [mode, holdings.length]);
+
+  useEffect(() => {
+    if (holdingsError && mode === 'loading') {
+      setMode('upload');
+    }
+  }, [holdingsError, mode]);
+
+  useEffect(() => {
     if (!userId || mode !== 'upload') return;
     void (async () => {
       const remote = await loadDraftsRemote(userId);
       if (remote && remote.length) {
-        setDrafts(remote);
+        setDrafts(hydrateDrafts(remote));
       } else {
         const local = loadDraftsLocal();
-        if (local.length) setDrafts(local);
+        if (local.length) setDrafts(hydrateDrafts(local));
       }
     })();
-  }, [userId, mode]);
+  }, [userId, mode, hydrateDrafts]);
 
   useEffect(() => {
     if (!userId || mode !== 'upload') return;
@@ -132,6 +128,18 @@ export default function PortfolioPage() {
   const readyCount = useMemo(
     () => (mode === 'upload' ? drafts.filter((draft) => draft.selected && isDraftReady(draft)).length : 0),
     [drafts, mode]
+  );
+  const missingCostCount = useMemo(
+    () =>
+      mode === 'upload'
+        ? drafts.filter((draft) => {
+            if (!draft.selected) return false;
+            const historyHolding = historyMap.get(draft.ticker.toUpperCase());
+            const resolved = draft.costBasis ?? historyHolding?.costBasis ?? null;
+            return resolved === null || resolved === undefined;
+          }).length
+        : 0,
+    [drafts, mode, historyMap]
   );
 
   const handleFile = async (file: File) => {
@@ -171,7 +179,7 @@ export default function PortfolioPage() {
       }
       const data = (await res.json()) as VisionAnalysisResult;
       setRawText(data.text ?? '');
-      const parsed = applyDerivedCostBasisToDrafts(parseHoldingsFromVision(data));
+      const parsed = hydrateDrafts(parseHoldingsFromVision(data));
       if (!parsed.length) {
         setError('Could not identify any holdings in the screenshot. Try a clearer image.');
       }
@@ -199,6 +207,8 @@ export default function PortfolioPage() {
             ? {
                 ...draft,
                 [field]: field === 'ticker' ? value.toUpperCase() : parseNumber(value),
+                costBasisSource:
+                  field === 'costBasis' ? 'manual' : draft.costBasisSource,
               }
             : draft
         )
@@ -225,24 +235,51 @@ export default function PortfolioPage() {
       return;
     }
 
+    const missingCost = readyDrafts
+      .map((draft) => ({
+        draft,
+        history: historyMap.get(draft.ticker.toUpperCase()),
+      }))
+      .filter(({ draft, history }) => (draft.costBasis ?? history?.costBasis ?? null) === null)
+      .map(({ draft }) => draft.ticker);
+    if (missingCost.length) {
+      setSaveHoldingsError(`Add cost basis for ${missingCost.slice(0, 3).join(', ')}${missingCost.length > 3 ? '…' : ''}`);
+      return;
+    }
+
     setSavingHoldings(true);
     setSaveHoldingsError(null);
     try {
-      const payload = readyDrafts.map((draft) => ({
-        id: draft.id,
-        ticker: draft.ticker,
-        shareQty: draft.shares,
-        costBasis: draft.costBasis ?? null,
-        marketValue: draft.marketValue ?? null,
-        confidence: draft.confidence ?? null,
-        source: draft.source ?? null,
-        draftId: draft.id,
-      }));
+      const historyByTicker = new Map(
+        holdings.map((holding) => [holding.ticker?.toUpperCase?.() ?? '', holding])
+      );
+      const payload = readyDrafts.map((draft) => {
+        const existing = historyByTicker.get(draft.ticker.toUpperCase());
+        const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
+        return {
+          id: existing?.id ?? draft.id,
+          ticker: draft.ticker,
+          shareQty: draft.shares,
+          assetType: draft.assetType ?? existing?.type ?? 'equity',
+          optionStrike: draft.optionStrike ?? existing?.optionStrike ?? null,
+          optionExpiration: draft.optionExpiration ?? existing?.optionExpiration ?? null,
+          optionRight: draft.optionRight ?? existing?.optionRight ?? null,
+          costBasis,
+          marketValue:
+            draft.marketValue ??
+            (costBasis && draft.shares ? costBasis * draft.shares : null) ??
+            existing?.marketValue ??
+            null,
+          confidence: draft.confidence ?? existing?.confidence ?? null,
+          source: draft.source ?? existing?.source ?? null,
+          draftId: draft.id,
+        };
+      });
 
       const res = await fetch('/api/portfolio/holdings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
-        body: JSON.stringify({ holdings: payload, replace: true }),
+        body: JSON.stringify({ holdings: payload, replace: false }),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -362,6 +399,11 @@ export default function PortfolioPage() {
                   Add share counts for the selected rows to continue.
                 </p>
               )}
+              {missingCostCount > 0 && (
+                <p className="mb-3 text-sm text-amber-700 dark:text-amber-300">
+                  {missingCostCount} row{missingCostCount === 1 ? '' : 's'} need a cost basis to keep P&amp;L accurate.
+                </p>
+              )}
               {saveHoldingsError && (
                 <div className="mb-3 flex items-center gap-2 text-sm text-red-500">
                   <AlertCircle size={16} /> {saveHoldingsError}
@@ -373,6 +415,7 @@ export default function PortfolioPage() {
                     <tr>
                       <th className="p-3 text-left">Use</th>
                       <th className="p-3 text-left">Ticker</th>
+                      <th className="p-3 text-left">Type</th>
                       <th className="p-3 text-left">Shares</th>
                       <th className="p-3 text-left">Cost Basis</th>
                       <th className="p-3 text-left">Market Value</th>
@@ -382,59 +425,94 @@ export default function PortfolioPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {drafts.map((draft) => (
-                      <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={draft.selected}
-                            onChange={() => toggleSelected(draft.id)}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            value={draft.ticker}
-                            onChange={(e) => handleDraftChange(draft.id, 'ticker', e.target.value)}
-                            className="w-20 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            value={draft.shares ?? ''}
-                            onChange={(e) => handleDraftChange(draft.id, 'shares', e.target.value)}
-                            className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            value={draft.costBasis ?? ''}
-                            onChange={(e) => handleDraftChange(draft.id, 'costBasis', e.target.value)}
-                            className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            value={draft.marketValue ?? ''}
-                            onChange={(e) => handleDraftChange(draft.id, 'marketValue', e.target.value)}
-                            className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </td>
-                        <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
-                        <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
-                          {draft.source}
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => removeDraft(draft.id)}
-                            className="text-red-500 hover:text-red-600"
-                            aria-label="Remove row"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {drafts.map((draft) => {
+                      const historyHolding = historyMap.get(draft.ticker.toUpperCase());
+                      const resolvedCostBasis = draft.costBasis ?? historyHolding?.costBasis ?? null;
+                      const costBasisMissing = resolvedCostBasis === null || resolvedCostBasis === undefined;
+                      const lastKnownCost = historyHolding?.costBasis ?? undefined;
+                      const costBasisPlaceholder =
+                        draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
+
+                      return (
+                        <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
+                          <td className="p-3">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={draft.selected}
+                              onChange={() => toggleSelected(draft.id)}
+                            />
+                          </td>
+                          <td className="p-3">
+                            <div className="flex flex-col gap-1">
+                              <input
+                                value={draft.ticker}
+                                onChange={(e) => handleDraftChange(draft.id, 'ticker', e.target.value)}
+                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                              {draft.assetType === 'option' && (
+                                <div className="text-[11px] text-gray-600 dark:text-gray-300">
+                                  {draft.optionStrike ? `$${draft.optionStrike}` : '—'}{' '}
+                                  {draft.optionRight ? draft.optionRight.toUpperCase() : 'OPTION'}{' '}
+                                  {draft.optionExpiration ?? ''}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                              {draft.assetType === 'option' ? 'Option' : 'Equity'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <input
+                              value={draft.shares ?? ''}
+                              onChange={(e) => handleDraftChange(draft.id, 'shares', e.target.value)}
+                              className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                            />
+                          </td>
+                          <td className="p-3">
+                            <input
+                              value={draft.costBasis ?? ''}
+                              placeholder={costBasisPlaceholder ? costBasisPlaceholder.toString() : undefined}
+                              onChange={(e) => handleDraftChange(draft.id, 'costBasis', e.target.value)}
+                              className={`w-28 rounded-md border px-2 py-1 text-sm ${
+                                costBasisMissing
+                                  ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/30'
+                                  : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                              }`}
+                            />
+                            {costBasisMissing ? (
+                              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+                                Add cost basis to lock in P&amp;L.
+                              </p>
+                            ) : draft.costBasisSource === 'history' ? (
+                              <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">Using last saved value</p>
+                            ) : null}
+                          </td>
+                          <td className="p-3">
+                            <input
+                              value={draft.marketValue ?? ''}
+                              onChange={(e) => handleDraftChange(draft.id, 'marketValue', e.target.value)}
+                              className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                            />
+                          </td>
+                          <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
+                          <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
+                            {draft.source}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              onClick={() => removeDraft(draft.id)}
+                              className="text-red-500 hover:text-red-600"
+                              aria-label="Remove row"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
