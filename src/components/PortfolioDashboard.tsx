@@ -135,9 +135,12 @@ export default function PortfolioDashboard({
                 <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                   <tr>
                     <th className="p-3 text-left">Ticker</th>
+                    <th className="p-3 text-left">Type</th>
                     <th className="p-3 text-left">Shares</th>
                     <th className="p-3 text-left">Cost Basis / Share</th>
-                    <th className="p-3 text-left">Market Value</th>
+                    <th className="p-3 text-left">Live Price</th>
+                    <th className="p-3 text-left">Live Value</th>
+                    <th className="p-3 text-left">P&L</th>
                     <th className="p-3 text-left">Confidence</th>
                     <th className="p-3 text-left">Source</th>
                   </tr>
@@ -153,10 +156,29 @@ export default function PortfolioDashboard({
                         >
                           {holding.ticker}
                         </button>
+                        {holding.type === 'option' && (
+                          <div className="text-[11px] text-gray-600 dark:text-gray-300">
+                            {holding.optionStrike ? `$${holding.optionStrike}` : '—'}{' '}
+                            {holding.optionRight ? holding.optionRight.toUpperCase() : 'OPTION'}{' '}
+                            {holding.optionExpiration ?? ''}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200">
+                          {holding.type === 'option' ? 'Option' : 'Equity'}
+                        </span>
                       </td>
                       <td className="p-3">{formatNumber(holding.shareQty)}</td>
                       <td className="p-3">{formatCurrency(holding.costBasis)}</td>
-                      <td className="p-3">{formatCurrency(holding.marketValue)}</td>
+                      <td className="p-3">{formatCurrency(holding.livePrice)}</td>
+                      <td className="p-3">{formatCurrency(holding.liveValue ?? holding.marketValue)}</td>
+                      <td className="p-3">
+                        <div className={(holding.liveGain ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                          <div>{formatCurrency(holding.liveGain)}</div>
+                          <div className="text-[11px]">{formatPercent(holding.liveGainPercent)}</div>
+                        </div>
+                      </td>
                       <td className="p-3">{formatPercent(holding.confidence)}</td>
                       <td className="p-3 text-xs text-gray-500 dark:text-gray-400">{holding.source ?? '—'}</td>
                     </tr>
