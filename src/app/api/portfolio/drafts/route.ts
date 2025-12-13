@@ -4,21 +4,30 @@ import { supabaseRestFetch } from '@/lib/supabase';
 const USER_ID_HEADER = 'x-portfolio-user-id';
 
 interface DraftPayload {
-  id?: unknown;
-  ticker?: unknown;
-  shares?: unknown;
-  costBasis?: unknown;
-  marketValue?: unknown;
-  confidence?: unknown;
-  source?: unknown;
-  selected?: unknown;
-  userId?: unknown;
+  id?: string | null;
+  ticker?: string | null;
+  shares?: number | string | null;
+  assetType?: string | null;
+  type?: string | null;
+  optionStrike?: number | string | null;
+  optionExpiration?: string | null;
+  optionRight?: string | null;
+  costBasis?: number | string | null;
+  marketValue?: number | string | null;
+  confidence?: number | string | null;
+  source?: string | null;
+  selected?: boolean | null;
+  userId?: string | null;
 }
 
 interface DraftInsert {
   id?: string;
   ticker: string;
   share_qty: number | null;
+  asset_type?: string | null;
+  option_strike?: number | null;
+  option_expiration?: string | null;
+  option_right?: 'call' | 'put' | null;
   cost_basis: number | null;
   market_value: number | null;
   confidence: number | null;
@@ -45,11 +54,22 @@ function toDraftInsert(draft: DraftPayload, userId: string): DraftInsert | null 
   if (!ticker) return null;
   const id = typeof draft.id === 'string' && draft.id.trim() ? draft.id.trim() : undefined;
   const source = typeof draft.source === 'string' && draft.source.trim() ? draft.source.trim() : null;
+  const rawType =
+    typeof draft.type === 'string'
+      ? draft.type
+      : typeof draft.assetType === 'string'
+        ? draft.assetType
+        : null;
+  const optionRight = typeof draft.optionRight === 'string' ? draft.optionRight.toLowerCase() : null;
 
   return {
     id,
     ticker,
     share_qty: normalizeNumber(draft.shares),
+    asset_type: rawType === 'option' ? 'option' : 'equity',
+    option_strike: normalizeNumber(draft.optionStrike),
+    option_expiration: typeof draft.optionExpiration === 'string' ? draft.optionExpiration : null,
+    option_right: optionRight === 'put' || optionRight === 'call' ? optionRight : null,
     cost_basis: normalizeNumber(draft.costBasis),
     market_value: normalizeNumber(draft.marketValue),
     confidence: normalizeNumber(draft.confidence),
@@ -107,11 +127,11 @@ export async function POST(req: NextRequest) {
         headers: { Prefer: 'return=minimal' },
       });
     }
-  await supabaseRestFetch('/rest/v1/portfolio_drafts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=merge-duplicates' },
-    body: JSON.stringify(inserts),
-  });
+    await supabaseRestFetch('/rest/v1/portfolio_drafts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal,resolution=merge-duplicates' },
+      body: JSON.stringify(inserts),
+    });
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to save drafts';
