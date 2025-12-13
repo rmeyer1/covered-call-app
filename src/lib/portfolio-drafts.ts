@@ -32,11 +32,45 @@ function withDerivedCostBasisDraft(draft: DraftRow): DraftRow {
   return {
     ...draft,
     costBasis: derived,
+    costBasisSource: draft.costBasisSource ?? 'derived',
   };
 }
 
 export function applyDerivedCostBasisToDrafts(drafts: DraftRow[]): DraftRow[] {
   return drafts.map((draft) => withDerivedCostBasisDraft(draft));
+}
+
+export function mergeCostBasisFromHistory(
+  drafts: DraftRow[],
+  holdings: PortfolioHolding[]
+): DraftRow[] {
+  if (!holdings.length) return drafts;
+  const historyMap = new Map(
+    holdings.map((holding) => [holding.ticker?.toUpperCase?.() ?? '', holding])
+  );
+
+  return drafts.map((draft) => {
+    const tickerKey = draft.ticker?.toUpperCase?.() ?? '';
+    const existing = tickerKey ? historyMap.get(tickerKey) : undefined;
+    if (!existing) return draft;
+    const costBasis = draft.costBasis ?? existing.costBasis ?? null;
+    const marketValue =
+      draft.marketValue ??
+      (costBasis && draft.shares ? costBasis * draft.shares : existing.marketValue ?? null);
+    const optionStrike = draft.optionStrike ?? existing.optionStrike ?? null;
+    const optionExpiration = draft.optionExpiration ?? existing.optionExpiration ?? null;
+    const optionRight = draft.optionRight ?? existing.optionRight ?? null;
+    return {
+      ...draft,
+      assetType: draft.assetType ?? existing.type ?? 'equity',
+      optionStrike,
+      optionExpiration,
+      optionRight,
+      costBasis,
+      costBasisSource: draft.costBasisSource ?? (draft.costBasis ? 'ocr' : existing.costBasis ? 'history' : undefined),
+      marketValue,
+    };
+  });
 }
 
 function withDerivedCostBasisHolding(holding: PortfolioHolding): PortfolioHolding {
@@ -52,6 +86,33 @@ export function applyDerivedCostBasisToHoldings(holdings: PortfolioHolding[]): P
   return holdings.map((holding) => withDerivedCostBasisHolding(holding));
 }
 
+function applySnapshotsToHoldings(
+  holdings: PortfolioHolding[],
+  snapshots?: PortfolioHoldingsResponse['snapshots']
+): PortfolioHolding[] {
+  if (!snapshots) return holdings;
+  return holdings.map((holding) => {
+    const snapshot = holding.ticker ? snapshots?.[holding.ticker] : undefined;
+    if (!snapshot) return holding;
+    const livePrice = snapshot.lastPrice ?? null;
+    const liveValue =
+      typeof livePrice === 'number' && Number.isFinite(livePrice) ? livePrice * (holding.shareQty ?? 0) : null;
+    const positionCost =
+      holding.costBasis && holding.shareQty ? holding.costBasis * holding.shareQty : null;
+    const liveGain =
+      liveValue !== null && positionCost !== null ? liveValue - positionCost : null;
+    const liveGainPercent =
+      liveGain !== null && positionCost ? liveGain / positionCost : null;
+    return {
+      ...holding,
+      livePrice,
+      liveValue,
+      liveGain,
+      liveGainPercent,
+    };
+  });
+}
+
 export function calculateStatsFromHoldings(
   holdings: PortfolioHolding[]
 ): PortfolioHoldingsResponse['stats'] {
@@ -63,7 +124,10 @@ export function calculateStatsFromHoldings(
     };
   }
 
-  const totalValue = holdings.reduce((sum, holding) => sum + (holding.marketValue ?? 0), 0);
+  const totalValue = holdings.reduce(
+    (sum, holding) => sum + (holding.liveValue ?? holding.marketValue ?? 0),
+    0
+  );
   const totalCost = holdings.reduce((sum, holding) => {
     const perShare = holding.costBasis ?? 0;
     return sum + perShare * (holding.shareQty ?? 0);
@@ -130,6 +194,7 @@ export function mergeStocksFromDrafts(drafts: DraftRow[]) {
     drafts.forEach((draft) => {
       if (!draft.selected) return;
       if (!draft.ticker || !draft.shares || Number.isNaN(draft.shares)) return;
+      if (draft.assetType === 'option') return;
       byTicker.set(draft.ticker, {
         ticker: draft.ticker,
         shares: Math.round(draft.shares),
@@ -162,9 +227,12 @@ export async function fetchHoldings(userId: string): Promise<{
   }
   const data = (await res.json()) as PortfolioHoldingsResponse;
   const rows = Array.isArray(data?.holdings) ? data.holdings : [];
+  const mapped = mapHoldingRows(rows);
+  const withDerived = applyDerivedCostBasisToHoldings(mapped);
+  const hydrated = applySnapshotsToHoldings(withDerived, data?.snapshots);
   return {
-    holdings: mapHoldingRows(rows),
-    stats: data?.stats,
+    holdings: hydrated,
+    stats: calculateStatsFromHoldings(hydrated),
   };
 }
 
@@ -209,6 +277,13 @@ export async function loadDraftsRemote(userId: string | null): Promise<DraftRow[
         typeof draft.share_qty === 'number'
           ? draft.share_qty
           : parseNumber(String(draft.share_qty ?? '')),
+      assetType: draft.asset_type ?? 'equity',
+      optionStrike:
+        typeof draft.option_strike === 'number'
+          ? draft.option_strike
+          : parseNumber(String(draft.option_strike ?? '')),
+      optionExpiration: draft.option_expiration ?? null,
+      optionRight: draft.option_right ?? null,
       costBasis:
         typeof draft.cost_basis === 'number'
           ? draft.cost_basis
