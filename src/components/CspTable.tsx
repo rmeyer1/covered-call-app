@@ -13,6 +13,20 @@ interface Props {
 
 type SortKey = 'strike' | 'premium' | 'delta' | 'returnAnn' | 'breakeven' | 'dte';
 
+type Row = {
+  strike: number;
+  premium: number;
+  delta?: number | null;
+  theta?: number | null;
+  iv: number | null;
+  returnPct: number;
+  returnAnn: number;
+  cashRequired: number;
+  assignProb: number;
+  breakeven: number;
+  dte: number;
+};
+
 export default function CspTable({ currentPrice, suggestions, basis }: Props) {
   const [showDeltaTip, setShowDeltaTip] = useState(false);
   const [showThetaTip, setShowThetaTip] = useState(false);
@@ -22,7 +36,7 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
   const [showExtrinsicTip, setShowExtrinsicTip] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'ascending' | 'descending' }>({ key: 'strike', direction: 'descending' });
 
-  const rows = useMemo(() => {
+  const rows: Row[] = useMemo(() => {
     return suggestions.map((s) => {
       const bid = s.bid ?? 0;
       const ask = s.ask ?? 0;
@@ -32,7 +46,7 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
       const returnAnn = returnPct * (365 / Math.max(1, s.dte));
       const breakeven = s.strike - premium;
       const cashRequired = s.strike * 100 - premium * 100;
-      const assignProb = Math.round(Math.abs((s.delta ?? 0)) * 100);
+      const assignProb = Math.round(Math.abs(s.delta ?? 0) * 100);
       return {
         strike: s.strike,
         premium,
@@ -45,17 +59,17 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
         assignProb,
         breakeven,
         dte: s.dte,
-      } as const;
+      };
     });
   }, [suggestions, basis]);
 
   const sortedRows = useMemo(() => {
     const copy = [...rows];
     const { key, direction } = sortConfig;
-    copy.sort((a: any, b: any) => {
+    copy.sort((a, b) => {
       const av = Number(a[key]);
       const bv = Number(b[key]);
-      if (isNaN(av) || isNaN(bv)) return 0;
+      if (Number.isNaN(av) || Number.isNaN(bv)) return 0;
       if (av < bv) return direction === 'ascending' ? -1 : 1;
       if (av > bv) return direction === 'ascending' ? 1 : -1;
       return 0;
@@ -64,7 +78,11 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
   }, [rows, sortConfig]);
 
   const requestSort = (key: SortKey) => {
-    setSortConfig((prev) => prev.key === key ? { key, direction: prev.direction === 'ascending' ? 'descending' : 'ascending' } : { key, direction: 'ascending' });
+    setSortConfig((prev) =>
+      prev.key === key
+        ? { key, direction: prev.direction === 'ascending' ? 'descending' : 'ascending' }
+        : { key, direction: 'ascending' }
+    );
   };
 
   return (
@@ -145,27 +163,12 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
                 </span>
                 {showReturnTip && (
                   <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
-                    Return on secured cash for the period: premium / strike.
+                    Period return on collateral (premium ÷ strike).
                   </div>
                 )}
               </th>
               <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap cursor-pointer" onClick={() => requestSort('returnAnn')}>Annualized %</th>
-              <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap relative align-middle">
-                <span
-                  className="inline-flex items-center gap-1"
-                  onMouseEnter={() => setShowExtrinsicTip(true)}
-                  onMouseLeave={() => setShowExtrinsicTip(false)}
-                  onFocus={() => setShowExtrinsicTip(true)}
-                  onBlur={() => setShowExtrinsicTip(false)}
-                >
-                  Cash Required <HelpCircle size={14} />
-                </span>
-                {showExtrinsicTip && (
-                  <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
-                    Approximate cash to secure the put: strike × 100 − premium × 100 (credit reduces required cash).
-                  </div>
-                )}
-              </th>
+              <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap">Cash Req.</th>
               <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap relative align-middle">
                 <span
                   className="inline-flex items-center gap-1"
@@ -174,47 +177,44 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
                   onFocus={() => setShowAssignTip(true)}
                   onBlur={() => setShowAssignTip(false)}
                 >
-                  Assignment Prob. <HelpCircle size={14} />
+                  Assign % <HelpCircle size={14} />
                 </span>
                 {showAssignTip && (
                   <div className="absolute z-30 left-auto right-0 sm:left-0 sm:right-auto top-full mt-2 max-w-[14rem] sm:max-w-[16rem] max-h-40 overflow-auto p-2 text-xs font-medium text-white bg-gray-900 rounded shadow-lg dark:bg-gray-700 break-words whitespace-normal">
-                    Rough approximation using |delta| as probability of finishing ITM.
+                    Approx assignment probability (|delta| × 100).
                   </div>
                 )}
               </th>
               <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap cursor-pointer" onClick={() => requestSort('breakeven')}>Breakeven</th>
               <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap cursor-pointer" onClick={() => requestSort('dte')}>DTE</th>
+              <th className="px-4 sm:px-6 py-2 sm:py-3 whitespace-nowrap">Extrinsic</th>
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((r, i) => {
-              const getYieldColor = (v: number) => {
-                if (v > 10) return 'text-green-400';
-                if (v > 5) return 'text-yellow-400';
-                return 'text-red-400';
-              };
+            {sortedRows.map((row) => {
+              const extrinsic = row.premium - Math.max(currentPrice - row.strike, 0);
               return (
-              <tr key={i} className="bg-white border-b dark:bg-gray-800 dark:border-gray-700">
-                <td className="px-4 sm:px-6 py-4">${r.strike}</td>
-                <td className="px-4 sm:px-6 py-4">${r.premium.toFixed(2)}</td>
-                <td className={`px-4 sm:px-6 py-4 ${Math.abs(r.delta ?? 0) > 0.3 ? 'text-yellow-500' : 'text-green-500'}`}>{typeof r.delta === 'number' ? r.delta.toFixed(4) : 'N/A'}</td>
-                <td className="px-4 sm:px-6 py-4 whitespace-nowrap align-middle"><ThetaBadge theta={r.theta ?? undefined} dte={r.dte} /></td>
-                <td className="px-4 sm:px-6 py-4">{typeof r.iv === 'number' ? r.iv.toFixed(1) + '%' : 'N/A'}</td>
-                <td className={`px-4 sm:px-6 py-4 font-bold ${getYieldColor(r.returnPct)}`}>{r.returnPct.toFixed(2)}%</td>
-                <td className={`px-4 sm:px-6 py-4 font-bold ${getYieldColor(r.returnAnn)}`}>
-                  <div className="flex items-center gap-2">
-                    {r.returnAnn.toFixed(2)}%
-                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                      <div className="bg-green-600 h-2.5 rounded-full" style={{ width: `${Math.min(r.returnAnn, 100)}%` }}></div>
+                <tr key={`${row.strike}-${row.dte}`} className="border-b dark:border-gray-700">
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.strike.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.premium.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.delta?.toFixed(2) ?? '—'}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.theta?.toFixed(2) ?? '—'}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.iv ? `${row.iv.toFixed(1)}%` : '—'}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.returnPct.toFixed(2)}%</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.returnAnn.toFixed(2)}%</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.cashRequired.toLocaleString()}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.assignProb}%</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">${row.breakeven.toFixed(2)}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">{row.dte}</td>
+                  <td className="px-4 sm:px-6 py-2 sm:py-3">
+                    <div className="flex items-center gap-2">
+                      <span>${extrinsic.toFixed(2)}</span>
+                      <ThetaBadge theta={row.theta ?? null} />
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 sm:px-6 py-4">${r.cashRequired.toLocaleString()}</td>
-                <td className="px-4 sm:px-6 py-4">{r.assignProb}%</td>
-                <td className="px-4 sm:px-6 py-4">${r.breakeven.toFixed(2)}</td>
-                <td className="px-4 sm:px-6 py-4">{r.dte}</td>
-              </tr>
-            );})}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
