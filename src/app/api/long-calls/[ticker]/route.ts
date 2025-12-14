@@ -61,12 +61,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
 
     const selectedExpiration = nextExp.toISOString().split('T')[0];
     return NextResponse.json({ currentPrice, selectedExpiration, suggestions, logoUrl: logoUrl ?? undefined });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logAxiosError(error, 'GET /api/long-calls/[ticker]');
     if (axios.isAxiosError(error) && error.response) {
       const status = error.response.status;
       return NextResponse.json({ error: 'Upstream Alpaca error', status }, { status: 502 });
     }
-    return NextResponse.json({ error: error?.message || 'Unknown server error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

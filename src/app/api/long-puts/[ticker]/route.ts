@@ -48,11 +48,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
     const suggestions = buildLongPutSuggestions(currentPrice, selected, nextExp);
 
     return NextResponse.json({ currentPrice, selectedExpiration: nextExp.toISOString().split('T')[0], suggestions, logoUrl: logoUrl ?? undefined });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logAxiosError(error, 'GET /api/long-puts/[ticker]');
     if (axios.isAxiosError(error) && error.response) {
       return NextResponse.json({ error: 'Upstream Alpaca error', status: error.response.status }, { status: 502 });
     }
-    return NextResponse.json({ error: error?.message || 'Unknown server error' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Unknown server error';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

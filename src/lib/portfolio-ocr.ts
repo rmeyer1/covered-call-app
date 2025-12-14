@@ -11,11 +11,25 @@ const headerKeywords = new Set([
   'PRICE',
   'COST',
   'BASIS',
+  'AVG',
+  'AVERAGE',
+  'TRADE',
   'MARKET',
   'VALUE',
   'TOTAL',
   'CHANGE',
 ]);
+
+const optionPattern =
+  /(?:^|\s)(\d{1,3})?\s*([A-Z]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\s+(\d{1,2}\/\d{1,2})/i;
+
+interface OptionMatch {
+  ticker: string;
+  strike: number;
+  right: 'call' | 'put';
+  expiration: string;
+  quantity?: number | null;
+}
 
 function createDraftId(): string {
   const cryptoRef = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
@@ -27,10 +41,15 @@ function createDraftId(): string {
 
 export function parseNumber(value: string | undefined | null): number | null {
   if (!value) return null;
-  const sanitized = value.replace(/[^0-9.\-]/g, '');
-  if (!sanitized) return null;
-  const parsed = Number.parseFloat(sanitized);
-  return Number.isFinite(parsed) ? parsed : null;
+  const cleaned = value.replace(/,/g, '').trim();
+  const match = cleaned.match(/(-?\d+(?:\.\d+)?)([kmb])?/i);
+  if (!match) return null;
+  const [, numeric, suffixRaw] = match;
+  const parsed = Number.parseFloat(numeric);
+  if (!Number.isFinite(parsed)) return null;
+  const suffix = suffixRaw?.toLowerCase();
+  const multiplier = suffix === 'k' ? 1_000 : suffix === 'm' ? 1_000_000 : suffix === 'b' ? 1_000_000_000 : 1;
+  return parsed * multiplier;
 }
 
 function normalizeTicker(text: string): string | null {
@@ -39,6 +58,20 @@ function normalizeTicker(text: string): string | null {
   const blacklist = new Set(['TOTAL', 'VALUE', 'PRICE', 'CASH', 'EQUITY']);
   if (blacklist.has(upper)) return null;
   return upper;
+}
+
+function parseOptionContract(text: string): OptionMatch | null {
+  const match = text.match(optionPattern);
+  if (!match) return null;
+  const [, quantityRaw, tickerRaw, strikeRaw, rightRaw, expirationRaw] = match;
+  const ticker = normalizeTicker(tickerRaw ?? '');
+  const strike = parseNumber(strikeRaw);
+  if (!ticker || strike === null) return null;
+  const right = rightRaw?.toLowerCase() === 'put' ? 'put' : 'call';
+  const quantity = parseNumber(quantityRaw ?? '') ?? null;
+  const expiration = expirationRaw?.trim() ?? '';
+  if (!expiration) return null;
+  return { ticker, strike, right, expiration, quantity };
 }
 
 function tokenizeParagraph(paragraph: VisionAnalysisResult['paragraphs'][number]): OcrTokenCandidate[] {
@@ -70,6 +103,23 @@ function hasCurrencySymbol(raw: string): boolean {
 
 function hasPercent(raw: string): boolean {
   return /%/.test(raw);
+}
+
+function pickNumericNearHeader(
+  numericCandidates: OcrNumericCandidate[],
+  headerIndex: number
+): OcrNumericCandidate | undefined {
+  const nearby = numericCandidates
+    .filter((candidate) => candidate.index > headerIndex - 1 && candidate.index <= headerIndex + 6)
+    .map((candidate) => ({
+      candidate,
+      score:
+        (hasCurrencySymbol(candidate.raw) ? 3 : 0) +
+        (candidate.raw.includes('.') ? 1 : 0) +
+        (candidate.index === headerIndex + 1 ? 1 : 0),
+    }))
+    .sort((a, b) => b.score - a.score || a.candidate.index - b.candidate.index);
+  return nearby[0]?.candidate;
 }
 
 function tokenizeNumeric(tokens: OcrTokenCandidate[]): OcrNumericCandidate[] {
@@ -126,6 +176,10 @@ function pickNextNumeric(
   return scored[0]?.candidate ?? filtered[0];
 }
 
+function hasMagnitudeSuffix(candidate?: { raw?: string | null }): boolean {
+  return /[kmb]\b/i.test(candidate?.raw ?? '');
+}
+
 function buildDraftRowFromParagraph(
   paragraph: VisionAnalysisResult['paragraphs'][number]
 ): DraftRow | null {
@@ -133,27 +187,58 @@ function buildDraftRowFromParagraph(
   const tokens = tokenizeParagraph(paragraph);
   if (!tokens.length) return null;
 
-  const tickerToken = tokens.find((token) => normalizeTicker(token.text) !== null);
-  if (!tickerToken) return null;
-  const ticker = normalizeTicker(tickerToken.text);
+  const optionMatch = parseOptionContract(paragraph.text ?? '');
+  const tickerToken =
+    tokens.find((token) => normalizeTicker(token.text) !== null) ??
+    (optionMatch
+      ? tokens.find((token) => token.text.toUpperCase() === optionMatch.ticker)
+      : undefined);
+  const ticker = optionMatch?.ticker ?? normalizeTicker(tickerToken?.text ?? '');
   if (!ticker) return null;
 
   const numericCandidates = tokenizeNumeric(tokens);
-  if (!numericCandidates.length) return null;
+  if (!numericCandidates.length && !optionMatch) return null;
 
-  const sharesCandidate = pickSharesCandidate(numericCandidates, tickerToken.index);
-  if (!sharesCandidate || sharesCandidate.value <= 0) return null;
+  const sharesCandidate = tickerToken
+    ? pickSharesCandidate(numericCandidates, tickerToken.index)
+    : undefined;
+  const sharesValue = sharesCandidate?.value ?? optionMatch?.quantity ?? null;
 
-  const costCandidate = pickNextNumeric(numericCandidates, sharesCandidate.index, true);
+  const tickerIndex = tickerToken?.index ?? 0;
+  const costHeaderIndex = tokens.findIndex((token) =>
+    /COST|BASIS|AVG|TRADE/.test(token.text.toUpperCase())
+  );
+  const costFromHeader =
+    costHeaderIndex >= 0 ? pickNumericNearHeader(numericCandidates, costHeaderIndex) : undefined;
+
+  const costCandidate =
+    costFromHeader ?? pickNextNumeric(numericCandidates, sharesCandidate?.index ?? tickerIndex, true);
   const marketCandidate = pickNextNumeric(
     numericCandidates,
-    costCandidate?.index ?? sharesCandidate.index,
+    costCandidate?.index ?? sharesCandidate?.index ?? tickerIndex,
     true
   );
 
+  // If the only/highest-confidence value has a magnitude suffix (K/M/B) and shares are known,
+  // treat it as a total value and derive cost per share later instead of using it as cost-per-share.
+  let resolvedCostBasis = costCandidate?.value ?? null;
+  let resolvedCostSource: DraftRow['costBasisSource'] = costCandidate ? 'ocr' : undefined;
+  let resolvedMarketValue = marketCandidate?.value ?? costCandidate?.value ?? null;
+
+  if (
+    costCandidate &&
+    sharesValue &&
+    hasMagnitudeSuffix(costCandidate) &&
+    (!marketCandidate || marketCandidate === costCandidate)
+  ) {
+    resolvedMarketValue = costCandidate.value;
+    resolvedCostBasis = null;
+    resolvedCostSource = undefined;
+  }
+
   const usedConfidences = [
-    tickerToken.confidence,
-    sharesCandidate.confidence,
+    tickerToken?.confidence,
+    sharesCandidate?.confidence,
     costCandidate?.confidence,
     marketCandidate?.confidence,
     paragraph.confidence,
@@ -164,15 +249,22 @@ function buildDraftRowFromParagraph(
       ? usedConfidences.reduce((sum, value) => sum + value, 0) / usedConfidences.length
       : 0.5;
   const completenessBoost =
-    (sharesCandidate ? 0.15 : 0) + (costCandidate || marketCandidate ? 0.1 : 0);
+    (sharesValue && sharesValue > 0 ? 0.15 : 0) +
+    (costCandidate || marketCandidate ? 0.1 : 0) +
+    (optionMatch ? 0.05 : 0);
   const confidence = Math.min(1, Math.max(0.35, avgConfidence + completenessBoost));
 
   return {
     id: createDraftId(),
     ticker,
-    shares: sharesCandidate.value,
-    costBasis: costCandidate?.value ?? null,
-    marketValue: marketCandidate?.value ?? costCandidate?.value ?? null,
+    shares: sharesValue,
+    assetType: optionMatch ? 'option' : 'equity',
+    optionStrike: optionMatch?.strike ?? null,
+    optionExpiration: optionMatch?.expiration ?? null,
+    optionRight: optionMatch?.right ?? null,
+    costBasis: resolvedCostBasis,
+    costBasisSource: resolvedCostSource,
+    marketValue: resolvedMarketValue,
     confidence,
     source: paragraph.text,
     selected: true,
@@ -227,7 +319,7 @@ function extractSharesFromLines(lines: string[]): number | null {
 function extractCurrencyValue(lines: string[]): number | null {
   for (const line of lines) {
     if (!hasCurrencySymbol(line)) continue;
-    const match = line.match(/(?:\$)\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?/);
+    const match = line.match(/(?:\$)\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/i);
     const parsed = parseNumber(match?.[0] ?? null);
     if (parsed !== null) return parsed;
   }
@@ -238,7 +330,7 @@ function extractSecondaryValue(lines: string[], sharesValue: number | null): num
   const candidates: number[] = [];
   lines.forEach((line) => {
     if (hasPercent(line)) return;
-    const matches = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/g) || [];
+    const matches = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/gi) || [];
     matches.forEach((value) => {
       const parsed = parseNumber(value);
       if (parsed !== null) candidates.push(parsed);
@@ -258,6 +350,34 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
   let index = 0;
   while (index < lines.length) {
     const line = lines[index];
+    const option = parseOptionContract(line);
+    if (option) {
+      const { source, sliceEnd } = collectContextLines(lines, index);
+      const contextLines = lines.slice(index, sliceEnd);
+      const shares = option.quantity ?? extractSharesFromLines(contextLines);
+      const currencyValue = extractCurrencyValue(contextLines);
+      const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
+
+      results.push({
+        id: createDraftId(),
+        ticker: option.ticker,
+        shares,
+        assetType: 'option',
+        optionStrike: option.strike,
+        optionExpiration: option.expiration,
+        optionRight: option.right,
+        costBasis: currencyValue ?? null,
+        costBasisSource: currencyValue ? 'ocr' : undefined,
+        marketValue: currencyValue ?? null,
+        confidence: Math.min(1, confidenceBase),
+        source,
+        selected: true,
+      });
+
+      index = sliceEnd;
+      continue;
+    }
+
     const ticker = normalizeTicker(line);
     if (!ticker) {
       index += 1;
@@ -312,7 +432,12 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
   map.set(incoming.ticker, {
     ...existing,
     shares: chooseValue(existing.shares, incoming.shares),
+    assetType: incoming.assetType ?? existing.assetType,
+    optionStrike: chooseValue(existing.optionStrike, incoming.optionStrike),
+    optionExpiration: incoming.optionExpiration ?? existing.optionExpiration ?? null,
+    optionRight: incoming.optionRight ?? existing.optionRight ?? null,
     costBasis: chooseValue(existing.costBasis, incoming.costBasis),
+    costBasisSource: incoming.costBasisSource ?? existing.costBasisSource,
     marketValue: chooseValue(existing.marketValue, incoming.marketValue),
     confidence: Math.max(existingConfidence, incomingConfidence),
     source: incomingConfidence > existingConfidence && incoming.source ? incoming.source : existing.source,

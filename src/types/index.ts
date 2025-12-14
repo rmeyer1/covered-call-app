@@ -1,5 +1,7 @@
 import type { VisionAnalysisResult } from '@/lib/vision';
 
+export type PortfolioAssetType = 'equity' | 'option';
+
 export interface Stock {
   ticker: string;
   shares: number;
@@ -118,6 +120,10 @@ export interface DraftHolding {
   id: string;
   ticker: string;
   shares: number | null;
+  assetType?: PortfolioAssetType;
+  optionStrike?: number | null;
+  optionExpiration?: string | null;
+  optionRight?: 'call' | 'put' | null;
   costBasis?: number | null;
   marketValue?: number | null;
   confidence?: number | null;
@@ -126,12 +132,17 @@ export interface DraftHolding {
 
 export interface DraftRow extends DraftHolding {
   selected: boolean;
+  costBasisSource?: 'ocr' | 'manual' | 'history' | 'derived';
 }
 
 export interface RemoteDraft {
   id?: string;
   ticker?: string | null;
   share_qty?: number | string | null;
+  asset_type?: PortfolioAssetType | null;
+  option_strike?: number | string | null;
+  option_expiration?: string | null;
+  option_right?: 'call' | 'put' | null;
   cost_basis?: number | string | null;
   market_value?: number | string | null;
   confidence?: number | string | null;
@@ -144,6 +155,10 @@ export interface PortfolioHoldingRow {
   user_id: string;
   ticker: string;
   share_qty: number;
+  type?: PortfolioAssetType | null;
+  option_strike?: number | null;
+  option_expiration?: string | null;
+  option_right?: 'call' | 'put' | null;
   cost_basis?: number | null;
   market_value?: number | null;
   confidence?: number | null;
@@ -159,8 +174,16 @@ export interface PortfolioHolding {
   userId: string;
   ticker: string;
   shareQty: number;
+  type?: PortfolioAssetType | null;
+  optionStrike?: number | null;
+  optionExpiration?: string | null;
+  optionRight?: 'call' | 'put' | null;
   costBasis?: number | null;
   marketValue?: number | null;
+  livePrice?: number | null;
+  liveValue?: number | null;
+  liveGain?: number | null;
+  liveGainPercent?: number | null;
   confidence?: number | null;
   source?: string | null;
   uploadId?: string | null;

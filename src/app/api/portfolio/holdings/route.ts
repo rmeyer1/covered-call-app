@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseRestFetch } from '@/lib/supabase';
-import type { PortfolioHoldingRow, PortfolioHoldingsResponse } from '@/types';
+import { getStockSnapshot, getUnderlyingPrice } from '@/lib/alpaca';
+import { logError, logWarn } from '@/lib/logger';
+import type { PortfolioHoldingRow, PortfolioHoldingSnapshot, PortfolioHoldingsResponse } from '@/types';
 
 const USER_ID_HEADER = 'x-portfolio-user-id';
 
@@ -21,9 +23,16 @@ function normalizeNullableNumber(value: number | string | null | undefined): num
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function calculateStats(holdings: PortfolioHoldingRow[]): PortfolioHoldingsResponse['stats'] {
+function calculateStats(
+  holdings: PortfolioHoldingRow[],
+  snapshots?: Record<string, PortfolioHoldingSnapshot>
+): PortfolioHoldingsResponse['stats'] {
   if (!holdings.length) return { totalValue: 0, totalCost: 0, totalGain: 0 };
-  const totalValue = holdings.reduce((sum, holding) => sum + (holding.market_value ?? 0), 0);
+  const totalValue = holdings.reduce((sum, holding) => {
+    const livePrice = snapshots?.[holding.ticker]?.lastPrice ?? null;
+    const value = livePrice ? livePrice * (holding.share_qty ?? 0) : holding.market_value ?? 0;
+    return sum + value;
+  }, 0);
   const totalCost = holdings.reduce(
     (sum, holding) => sum + (holding.cost_basis ?? 0) * (holding.share_qty ?? 0),
     0
@@ -36,6 +45,54 @@ function calculateStats(holdings: PortfolioHoldingRow[]): PortfolioHoldingsRespo
   };
 }
 
+async function fetchSnapshots(
+  tickers: string[]
+): Promise<Record<string, PortfolioHoldingSnapshot>> {
+  if (!tickers.length) return {};
+  const unique = Array.from(new Set(tickers.filter(Boolean)));
+  const entries = await Promise.all(
+    unique.map(async (ticker) => {
+      try {
+        const snapshot = await getStockSnapshot(ticker);
+        let lastPrice = snapshot?.latestTrade?.p ?? snapshot?.dailyBar?.c ?? null;
+        if (lastPrice === null) {
+          try {
+            lastPrice = await getUnderlyingPrice(ticker);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logWarn('portfolio.holdings.snapshot.fallback', { ticker, error: message });
+          }
+        }
+        const prevClose = snapshot?.prevDailyBar?.c ?? snapshot?.dailyBar?.o ?? null;
+        const change = lastPrice !== null && prevClose !== null ? lastPrice - prevClose : null;
+        const changePercent =
+          change !== null && prevClose ? (change === 0 ? 0 : change / prevClose) : null;
+        return [
+          ticker,
+          {
+            lastPrice,
+            prevClose,
+            change,
+            changePercent,
+            updatedAt: snapshot?.latestTrade?.t ?? snapshot?.dailyBar?.t ?? null,
+          } satisfies PortfolioHoldingSnapshot,
+        ] as const;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logError('portfolio.holdings.snapshot', { ticker, error: message });
+        return null;
+      }
+    })
+  );
+
+  return entries.reduce<Record<string, PortfolioHoldingSnapshot>>((acc, entry) => {
+    if (!entry) return acc;
+    const [ticker, snapshot] = entry;
+    acc[ticker] = snapshot;
+    return acc;
+  }, {});
+}
+
 export async function GET(req: NextRequest) {
   try {
     const userId = resolveUserId(req);
@@ -43,6 +100,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
+    const includeLive = req.nextUrl.searchParams.get('live') !== 'false';
     const encodedUserId = encodeURIComponent(userId);
     const rows = await supabaseRestFetch<PortfolioHoldingRow[] | (PortfolioHoldingRow & { share_qty: string })[]>(
       `/rest/v1/portfolio_holdings?user_id=eq.${encodedUserId}&order=updated_at.desc`
@@ -56,11 +114,21 @@ export async function GET(req: NextRequest) {
             const costBasis = normalizeNullableNumber(row.cost_basis);
             const marketValue = normalizeNullableNumber(row.market_value);
             const confidence = normalizeNullableNumber(row.confidence);
+            const optionStrike = normalizeNullableNumber(row.option_strike);
+            const optionExpiration =
+              typeof row.option_expiration === 'string' ? row.option_expiration : null;
+            const optionRightRaw = row.option_right;
+            const optionRight =
+              optionRightRaw === 'put' || optionRightRaw === 'call' ? optionRightRaw : null;
             const formatted: PortfolioHoldingRow = {
               id: row.id,
               user_id: row.user_id,
               ticker: row.ticker,
               share_qty: shareQty,
+              type: row.type ?? null,
+              option_strike: optionStrike,
+              option_expiration: optionExpiration,
+              option_right: optionRight,
               cost_basis: costBasis,
               market_value: marketValue,
               confidence,
@@ -75,9 +143,12 @@ export async function GET(req: NextRequest) {
           .filter((row): row is PortfolioHoldingRow => row !== null)
       : [];
 
+    const snapshots = includeLive ? await fetchSnapshots(holdings.map((holding) => holding.ticker)) : undefined;
+
     const payload: PortfolioHoldingsResponse = {
       holdings,
-      stats: calculateStats(holdings),
+      stats: calculateStats(holdings, snapshots),
+      snapshots,
     };
 
     return NextResponse.json(payload);
@@ -88,15 +159,20 @@ export async function GET(req: NextRequest) {
 }
 
 interface HoldingPayload {
-  id?: unknown;
-  ticker?: unknown;
-  shareQty?: unknown;
-  costBasis?: unknown;
-  marketValue?: unknown;
-  confidence?: unknown;
-  source?: unknown;
-  uploadId?: unknown;
-  draftId?: unknown;
+  id?: string | null;
+  ticker?: string | null;
+  shareQty?: number | string | null;
+  assetType?: string | null;
+  type?: string | null;
+  optionStrike?: number | string | null;
+  optionExpiration?: string | null;
+  optionRight?: string | null;
+  costBasis?: number | string | null;
+  marketValue?: number | string | null;
+  confidence?: number | string | null;
+  source?: string | null;
+  uploadId?: string | null;
+  draftId?: string | null;
 }
 
 function normalizeNumberInput(value: unknown): number | null {
@@ -115,15 +191,35 @@ function toHoldingRow(body: HoldingPayload, userId: string): PortfolioHoldingRow
   if (!ticker) return null;
   const shareQty = normalizeNumberInput(body.shareQty);
   if (shareQty === null) return null;
+  const rawType =
+    typeof body.type === 'string'
+      ? body.type
+      : typeof body.assetType === 'string'
+        ? body.assetType
+        : '';
+  const type = rawType.toLowerCase() === 'option' ? 'option' : 'equity';
   const costBasis = normalizeNumberInput(body.costBasis);
   const marketValue = normalizeNumberInput(body.marketValue);
   const confidence = normalizeNumberInput(body.confidence);
+  const optionStrike = normalizeNumberInput(body.optionStrike);
+  const optionExpiration = typeof body.optionExpiration === 'string' ? body.optionExpiration : null;
+  const optionRightRaw = typeof body.optionRight === 'string' ? body.optionRight : '';
+  const optionRight =
+    optionRightRaw.toLowerCase() === 'put'
+      ? 'put'
+      : optionRightRaw.toLowerCase() === 'call'
+        ? 'call'
+        : null;
 
   return {
     id: typeof body.id === 'string' && body.id.trim() ? body.id.trim() : randomUUID(),
     user_id: userId,
     ticker,
     share_qty: shareQty,
+    type,
+    option_strike: optionStrike,
+    option_expiration: optionExpiration,
+    option_right: optionRight,
     cost_basis: costBasis,
     market_value: marketValue,
     confidence,

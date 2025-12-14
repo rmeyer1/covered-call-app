@@ -5,6 +5,8 @@
 
 const isBrowser = typeof window !== 'undefined';
 
+type EnvSource = { env?: Record<string, string | undefined> };
+
 function parseBool(value: string | undefined): boolean | undefined {
   if (value === undefined) return undefined;
   return /^(1|true|yes|on)$/i.test(value.trim());
@@ -12,7 +14,7 @@ function parseBool(value: string | undefined): boolean | undefined {
 
 function isEnabled(): boolean {
   if (isBrowser) {
-    const env = (process as any)?.env?.NEXT_PUBLIC_LOGGING_ENABLED as string | undefined;
+    const env = (process as EnvSource | undefined)?.env?.NEXT_PUBLIC_LOGGING_ENABLED;
     const parsed = parseBool(env);
     if (parsed !== undefined) return parsed;
     return process.env.NODE_ENV !== 'production';
@@ -39,34 +41,44 @@ export function maskSecret(v: string): string {
 
 export function logDebug(context: string, data?: unknown) {
   if (!isEnabled()) return;
-  // eslint-disable-next-line no-console
+  
   console.debug(`[${context}]`, data !== undefined ? safeData(data) : '');
 }
 
 export function logInfo(context: string, data?: unknown) {
   if (!isEnabled()) return;
-  // eslint-disable-next-line no-console
+  
   console.log(`[${context}]`, data !== undefined ? safeData(data) : '');
 }
 
 export function logWarn(context: string, data?: unknown) {
   if (!isEnabled()) return;
-  // eslint-disable-next-line no-console
+  
   console.warn(`[${context}]`, data !== undefined ? safeData(data) : '');
 }
 
 export function logError(context: string, data?: unknown) {
   if (!isEnabled()) return;
-  // eslint-disable-next-line no-console
+  
   console.error(`[${context}]`, data !== undefined ? safeData(data) : '');
+}
+
+interface AxiosishError {
+  isAxiosError?: boolean;
+  message?: string;
+  config?: { url?: string; method?: string; params?: unknown };
+  response?: { status?: number; statusText?: string; data?: unknown };
 }
 
 export function logAxiosError(err: unknown, context: string) {
   if (!isEnabled()) return;
-  // Lazy import type guard to avoid bundling weight
-  const isAxios = (e: any) => !!e && (e.isAxiosError || e?.config || e?.response);
+  const isAxios = (e: unknown): e is AxiosishError => {
+    if (!e || typeof e !== 'object') return false;
+    const maybe = e as AxiosishError;
+    return Boolean(maybe.isAxiosError || maybe.config || maybe.response);
+  };
   if (isAxios(err)) {
-    const e: any = err;
+    const e = err;
     logError(context, {
       message: e.message,
       url: e.config?.url,
@@ -80,4 +92,3 @@ export function logAxiosError(err: unknown, context: string) {
     logError(context, err);
   }
 }
-
