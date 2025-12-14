@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseRestFetch } from '@/lib/supabase';
-import { getStockSnapshot } from '@/lib/alpaca';
-import { logError } from '@/lib/logger';
+import { getStockSnapshot, getUnderlyingPrice } from '@/lib/alpaca';
+import { logError, logWarn } from '@/lib/logger';
 import type { PortfolioHoldingRow, PortfolioHoldingSnapshot, PortfolioHoldingsResponse } from '@/types';
 
 const USER_ID_HEADER = 'x-portfolio-user-id';
@@ -54,7 +54,15 @@ async function fetchSnapshots(
     unique.map(async (ticker) => {
       try {
         const snapshot = await getStockSnapshot(ticker);
-        const lastPrice = snapshot?.latestTrade?.p ?? snapshot?.dailyBar?.c ?? null;
+        let lastPrice = snapshot?.latestTrade?.p ?? snapshot?.dailyBar?.c ?? null;
+        if (lastPrice === null) {
+          try {
+            lastPrice = await getUnderlyingPrice(ticker);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            logWarn('portfolio.holdings.snapshot.fallback', { ticker, error: message });
+          }
+        }
         const prevClose = snapshot?.prevDailyBar?.c ?? snapshot?.dailyBar?.o ?? null;
         const change = lastPrice !== null && prevClose !== null ? lastPrice - prevClose : null;
         const changePercent =
