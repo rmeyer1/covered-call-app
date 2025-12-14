@@ -122,6 +122,26 @@ function pickNumericNearHeader(
   return nearby[0]?.candidate;
 }
 
+function pickCurrencyNearPhrase(
+  numericCandidates: OcrNumericCandidate[],
+  tokens: OcrTokenCandidate[],
+  phrase: RegExp
+): OcrNumericCandidate | undefined {
+  const joined = tokens.map((t) => t.text).join(' ').toUpperCase();
+  if (!phrase.test(joined)) return undefined;
+  const currencyCandidates = numericCandidates.filter((c) => hasCurrencySymbol(c.raw));
+  if (!currencyCandidates.length) return undefined;
+  // Prefer the first currency number that appears after the phrase start.
+  const startIdx = tokens.findIndex((t) => phrase.test(t.text.toUpperCase()));
+  const ordered = currencyCandidates
+    .map((c) => ({
+      candidate: c,
+      distance: startIdx >= 0 ? Math.max(0, c.index - startIdx) : c.index,
+    }))
+    .sort((a, b) => a.distance - b.distance || a.candidate.index - b.candidate.index);
+  return ordered[0]?.candidate;
+}
+
 function tokenizeNumeric(tokens: OcrTokenCandidate[]): OcrNumericCandidate[] {
   return tokens
     .map<OcrNumericCandidate | null>((token) => {
@@ -210,9 +230,16 @@ function buildDraftRowFromParagraph(
   );
   const costFromHeader =
     costHeaderIndex >= 0 ? pickNumericNearHeader(numericCandidates, costHeaderIndex) : undefined;
+  const costFromAveragePhrase = pickCurrencyNearPhrase(
+    numericCandidates,
+    tokens,
+    /AVERAGE\s*COST|AVG\s*COST/i
+  );
 
   const costCandidate =
-    costFromHeader ?? pickNextNumeric(numericCandidates, sharesCandidate?.index ?? tickerIndex, true);
+    costFromHeader ??
+    costFromAveragePhrase ??
+    pickNextNumeric(numericCandidates, sharesCandidate?.index ?? tickerIndex, true);
   const marketCandidate = pickNextNumeric(
     numericCandidates,
     costCandidate?.index ?? sharesCandidate?.index ?? tickerIndex,
