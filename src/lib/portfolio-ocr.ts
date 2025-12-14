@@ -41,10 +41,15 @@ function createDraftId(): string {
 
 export function parseNumber(value: string | undefined | null): number | null {
   if (!value) return null;
-  const sanitized = value.replace(/[^0-9.\-]/g, '');
-  if (!sanitized) return null;
-  const parsed = Number.parseFloat(sanitized);
-  return Number.isFinite(parsed) ? parsed : null;
+  const cleaned = value.replace(/,/g, '').trim();
+  const match = cleaned.match(/(-?\d+(?:\.\d+)?)([kmb])?/i);
+  if (!match) return null;
+  const [, numeric, suffixRaw] = match;
+  const parsed = Number.parseFloat(numeric);
+  if (!Number.isFinite(parsed)) return null;
+  const suffix = suffixRaw?.toLowerCase();
+  const multiplier = suffix === 'k' ? 1_000 : suffix === 'm' ? 1_000_000 : suffix === 'b' ? 1_000_000_000 : 1;
+  return parsed * multiplier;
 }
 
 function normalizeTicker(text: string): string | null {
@@ -171,6 +176,10 @@ function pickNextNumeric(
   return scored[0]?.candidate ?? filtered[0];
 }
 
+function hasMagnitudeSuffix(candidate?: { raw?: string | null }): boolean {
+  return /[kmb]\b/i.test(candidate?.raw ?? '');
+}
+
 function buildDraftRowFromParagraph(
   paragraph: VisionAnalysisResult['paragraphs'][number]
 ): DraftRow | null {
@@ -210,6 +219,23 @@ function buildDraftRowFromParagraph(
     true
   );
 
+  // If the only/highest-confidence value has a magnitude suffix (K/M/B) and shares are known,
+  // treat it as a total value and derive cost per share later instead of using it as cost-per-share.
+  let resolvedCostBasis = costCandidate?.value ?? null;
+  let resolvedCostSource: DraftRow['costBasisSource'] = costCandidate ? 'ocr' : undefined;
+  let resolvedMarketValue = marketCandidate?.value ?? costCandidate?.value ?? null;
+
+  if (
+    costCandidate &&
+    sharesValue &&
+    hasMagnitudeSuffix(costCandidate) &&
+    (!marketCandidate || marketCandidate === costCandidate)
+  ) {
+    resolvedMarketValue = costCandidate.value;
+    resolvedCostBasis = null;
+    resolvedCostSource = undefined;
+  }
+
   const usedConfidences = [
     tickerToken?.confidence,
     sharesCandidate?.confidence,
@@ -236,9 +262,9 @@ function buildDraftRowFromParagraph(
     optionStrike: optionMatch?.strike ?? null,
     optionExpiration: optionMatch?.expiration ?? null,
     optionRight: optionMatch?.right ?? null,
-    costBasis: costCandidate?.value ?? null,
-    costBasisSource: costCandidate ? 'ocr' : undefined,
-    marketValue: marketCandidate?.value ?? costCandidate?.value ?? null,
+    costBasis: resolvedCostBasis,
+    costBasisSource: resolvedCostSource,
+    marketValue: resolvedMarketValue,
     confidence,
     source: paragraph.text,
     selected: true,
@@ -293,7 +319,7 @@ function extractSharesFromLines(lines: string[]): number | null {
 function extractCurrencyValue(lines: string[]): number | null {
   for (const line of lines) {
     if (!hasCurrencySymbol(line)) continue;
-    const match = line.match(/(?:\$)\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?/);
+    const match = line.match(/(?:\$)\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/i);
     const parsed = parseNumber(match?.[0] ?? null);
     if (parsed !== null) return parsed;
   }
@@ -304,7 +330,7 @@ function extractSecondaryValue(lines: string[], sharesValue: number | null): num
   const candidates: number[] = [];
   lines.forEach((line) => {
     if (hasPercent(line)) return;
-    const matches = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/g) || [];
+    const matches = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/gi) || [];
     matches.forEach((value) => {
       const parsed = parseNumber(value);
       if (parsed !== null) candidates.push(parsed);
