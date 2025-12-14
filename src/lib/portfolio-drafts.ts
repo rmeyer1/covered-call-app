@@ -180,7 +180,11 @@ export function loadDraftsLocal(): DraftRow[] {
     const raw = localStorage.getItem('portfolio.drafts');
     if (!raw) return [];
     const parsed = JSON.parse(raw) as DraftRow[];
-    return applyDerivedCostBasisToDrafts(parsed);
+    const normalized = parsed.map((draft) => ({
+      ...draft,
+      viewType: draft.viewType ?? 'unknown',
+    }));
+    return applyDerivedCostBasisToDrafts(normalized);
   } catch (err) {
     console.error('Failed to read drafts', err);
     return [];
@@ -308,6 +312,7 @@ export async function loadDraftsRemote(userId: string | null): Promise<DraftRow[
           ? draft.confidence
           : parseNumber(String(draft.confidence ?? '')),
       source: draft.source ?? undefined,
+      viewType: draft.view_type ?? 'unknown',
       selected: Boolean(draft.selected ?? true),
     }));
     return applyDerivedCostBasisToDrafts(mapped);

@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2 } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2, ListChecks, FileSearch } from 'lucide-react';
 import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
-import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
+import { mergeDraftLists, parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
 import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
@@ -23,6 +23,39 @@ import { usePortfolioHistory } from '@/hooks/usePortfolioHistory';
 import PortfolioDashboard from '@/components/PortfolioDashboard';
 
 type ViewMode = 'loading' | 'dashboard' | 'upload';
+type UploadQueueState = {
+  total: number;
+  completed: number;
+  active: number;
+  currentFile: string | null;
+  errors: string[];
+};
+
+function UploadQueueStatus({ state }: { state: UploadQueueState }) {
+  if (!state.total) return null;
+  const processed = Math.min(state.completed + state.active, state.total);
+  const percent = Math.min(100, Math.round((state.completed / state.total) * 100));
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 rounded-lg border border-blue-100 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/30 p-3 text-sm text-blue-900 dark:text-blue-200">
+      <div className="flex items-center gap-2">
+        <Loader2 size={16} className={state.active ? 'animate-spin' : ''} />
+        <span>
+          Analyzing {processed} of {state.total}
+          {state.currentFile ? ` (${state.currentFile})` : ''}
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-blue-100 dark:bg-blue-900/60 overflow-hidden">
+        <div className="h-full bg-blue-500 dark:bg-blue-400" style={{ width: `${percent}%` }} />
+      </div>
+      {state.errors.length > 0 && (
+        <div className="text-xs text-amber-800 dark:text-amber-300">
+          {state.errors.length} file{state.errors.length === 1 ? '' : 's'} need attention.
+        </div>
+      )}
+    </div>
+  );
+}
 
 
 export default function PortfolioPage() {
@@ -30,6 +63,13 @@ export default function PortfolioPage() {
   const [rawText, setRawText] = useState('');
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [queueState, setQueueState] = useState<UploadQueueState>({
+    total: 0,
+    completed: 0,
+    active: 0,
+    currentFile: null,
+    errors: [],
+  });
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
@@ -54,6 +94,7 @@ export default function PortfolioPage() {
     setRawImage(null);
     setRawText('');
     setDrafts([]);
+    setQueueState({ total: 0, completed: 0, active: 0, currentFile: null, errors: [] });
     setMode('upload');
   }, []);
 
@@ -142,14 +183,11 @@ export default function PortfolioPage() {
     [drafts, mode, historyMap]
   );
 
-  const handleFile = async (file: File) => {
-    setError(null);
-    if (!userId) {
-      setError('Cannot upload without a session. Please refresh and try again.');
-      return;
-    }
-    setUploading(true);
-    try {
+  const analyzeFile = useCallback(
+    async (file: File) => {
+      if (!userId) {
+        throw new Error('Cannot upload without a session. Please refresh and try again.');
+      }
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -160,7 +198,6 @@ export default function PortfolioPage() {
         reader.onerror = () => reject(reader.error ?? new Error('File read error'));
         reader.readAsDataURL(file);
       });
-      setRawImage(base64);
       void fetch('/api/portfolio/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
@@ -178,24 +215,87 @@ export default function PortfolioPage() {
         throw new Error(data?.error || `Vision error ${res.status}`);
       }
       const data = (await res.json()) as VisionAnalysisResult;
-      setRawText(data.text ?? '');
-      const parsed = hydrateDrafts(parseHoldingsFromVision(data));
-      if (!parsed.length) {
-        setError('Could not identify any holdings in the screenshot. Try a clearer image.');
+      const parsed = parseHoldingsFromVision(data);
+      return { base64, parsed, rawText: data.text ?? '' };
+    },
+    [userId]
+  );
+
+  const handleFiles = useCallback(
+    async (files: FileList | File[]) => {
+      setError(null);
+      if (!userId) {
+        setError('Cannot upload without a session. Please refresh and try again.');
+        return;
       }
-      setDrafts(parsed);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setError(message);
-    } finally {
+      const incoming = Array.from(files);
+      if (!incoming.length) return;
+      if (incoming.length > 25) {
+        setError('You can upload up to 25 screenshots at once. Only the first 25 will be processed.');
+      }
+      const selected = incoming.slice(0, 25);
+      setUploading(true);
+      setQueueState({
+        total: selected.length,
+        completed: 0,
+        active: 0,
+        currentFile: null,
+        errors: [],
+      });
+      const errors: string[] = [];
+      let pointer = 0;
+      const worker = async () => {
+        while (pointer < selected.length) {
+          const currentIndex = pointer++;
+          const file = selected[currentIndex];
+          setQueueState((prev) => ({
+            ...prev,
+            active: prev.active + 1,
+            currentFile: file.name,
+          }));
+          try {
+            const { base64, parsed, rawText: text } = await analyzeFile(file);
+            setRawImage(base64);
+            setRawText(text);
+            setDrafts((prev) => {
+              const merged = mergeDraftLists(prev, parsed);
+              return hydrateDrafts(merged);
+            });
+            if (!parsed.length) {
+              errors.push(`${file.name}: No holdings detected`);
+              setError(`Could not identify any holdings in ${file.name}. Try a clearer image.`);
+            }
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Upload failed';
+            errors.push(`${file.name}: ${message}`);
+            console.error('Upload failed', err);
+          } finally {
+            setQueueState((prev) => ({
+              ...prev,
+              active: Math.max(prev.active - 1, 0),
+              completed: prev.completed + 1,
+              currentFile: prev.active > 1 ? prev.currentFile : null,
+              errors,
+            }));
+          }
+        }
+      };
+
+      const concurrency = Math.min(3, selected.length);
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      setQueueState((prev) => ({ ...prev, active: 0, currentFile: null, errors }));
       setUploading(false);
-    }
-  };
+      if (errors.length) {
+        setError(errors.join(' | '));
+      }
+    },
+    [analyzeFile, hydrateDrafts, userId]
+  );
 
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    void handleFile(file);
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    void handleFiles(files);
     event.target.value = '';
   };
 
@@ -354,13 +454,18 @@ export default function PortfolioPage() {
 
           <section className="mb-8">
             <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 cursor-pointer hover:border-blue-500 transition bg-white dark:bg-gray-800">
-              <input type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileInput} />
               <Upload size={32} className="text-blue-500" />
               <div className="text-center text-sm text-gray-600 dark:text-gray-400">
-                Drag & drop an image here, or <span className="text-blue-500">browse</span>
+                Drag & drop up to 25 screenshots here, or <span className="text-blue-500">browse</span>
               </div>
-              {uploading && <div className="text-sm text-blue-500">Analyzing screenshot…</div>}
+              {uploading && (
+                <div className="text-sm text-blue-500">
+                  {queueState.total ? 'Processing uploads…' : 'Analyzing screenshot…'}
+                </div>
+              )}
             </label>
+            <UploadQueueStatus state={queueState} />
             {error && (
               <div className="mt-3 flex items-center gap-2 text-sm text-red-500">
                 <AlertCircle size={16} /> {error}
@@ -432,6 +537,27 @@ export default function PortfolioPage() {
                       const lastKnownCost = historyHolding?.costBasis ?? undefined;
                       const costBasisPlaceholder =
                         draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
+                      const viewType = draft.viewType ?? 'unknown';
+                      const viewBadge =
+                        viewType === 'detail'
+                          ? {
+                              label: 'Detail view',
+                              color:
+                                'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
+                              icon: FileSearch,
+                            }
+                          : viewType === 'list'
+                          ? {
+                              label: 'List view',
+                              color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200',
+                              icon: ListChecks,
+                            }
+                          : {
+                              label: 'Source unknown',
+                              color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+                              icon: AlertCircle,
+                            };
+                      const ViewIcon = viewBadge.icon;
 
                       return (
                         <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
@@ -498,8 +624,20 @@ export default function PortfolioPage() {
                             />
                           </td>
                           <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
-                          <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
-                            {draft.source}
+                          <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs">
+                            <div className="flex flex-col gap-1">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold ${viewBadge.color}`}
+                              >
+                                <ViewIcon size={14} />
+                                {viewBadge.label}
+                              </span>
+                              {draft.source && (
+                                <span className="block truncate" title={draft.source}>
+                                  {draft.source}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
                             <button

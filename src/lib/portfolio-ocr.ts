@@ -1,4 +1,4 @@
-import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate } from '@/types';
+import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate, ViewType } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 
 const headerKeywords = new Set([
@@ -22,6 +22,8 @@ const headerKeywords = new Set([
 
 const optionPattern =
   /(?:^|\s)(\d{1,3})?\s*([A-Z]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\s+(\d{1,2}\/\d{1,2})/i;
+
+const detailKeywords = [/AVERAGE\s+COST/i, /AVG\s+COST/i, /EQUITY\s+VALUE/i, /TODAY'?S\s+RETURN/i];
 
 interface OptionMatch {
   ticker: string;
@@ -103,6 +105,18 @@ function hasCurrencySymbol(raw: string): boolean {
 
 function hasPercent(raw: string): boolean {
   return /%/.test(raw);
+}
+
+function detectDetailKeywords(text?: string | null): boolean {
+  if (!text) return false;
+  return detailKeywords.some((pattern) => pattern.test(text));
+}
+
+function classifyViewType(candidates: DraftRow[], text?: string | null): ViewType {
+  const distinctTickers = new Set(candidates.map((candidate) => candidate.ticker?.toUpperCase?.() ?? '')).size;
+  if (distinctTickers > 3) return 'list';
+  if (distinctTickers === 1 && detectDetailKeywords(text)) return 'detail';
+  return 'unknown';
 }
 
 function pickNumericNearHeader(
@@ -265,6 +279,7 @@ function buildDraftRowFromParagraph(
     costBasis: resolvedCostBasis,
     costBasisSource: resolvedCostSource,
     marketValue: resolvedMarketValue,
+    viewType: 'unknown',
     confidence,
     source: paragraph.text,
     selected: true,
@@ -365,14 +380,15 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
         assetType: 'option',
         optionStrike: option.strike,
         optionExpiration: option.expiration,
-        optionRight: option.right,
-        costBasis: currencyValue ?? null,
-        costBasisSource: currencyValue ? 'ocr' : undefined,
-        marketValue: currencyValue ?? null,
-        confidence: Math.min(1, confidenceBase),
-        source,
-        selected: true,
-      });
+      optionRight: option.right,
+      costBasis: currencyValue ?? null,
+      costBasisSource: currencyValue ? 'ocr' : undefined,
+      marketValue: currencyValue ?? null,
+      viewType: 'unknown',
+      confidence: Math.min(1, confidenceBase),
+      source,
+      selected: true,
+    });
 
       index = sliceEnd;
       continue;
@@ -402,6 +418,7 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       shares,
       costBasis: secondaryValue ?? null,
       marketValue: currencyValue ?? secondaryValue ?? null,
+      viewType: 'unknown',
       confidence: Math.min(1, confidenceBase),
       source,
       selected: true,
@@ -414,14 +431,18 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
 }
 
 function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
-  const existing = map.get(incoming.ticker);
+  const tickerKey = incoming.ticker?.toUpperCase?.() ?? incoming.ticker;
+  const existing = tickerKey ? map.get(tickerKey) : undefined;
   if (!existing) {
-    map.set(incoming.ticker, incoming);
+    if (tickerKey) map.set(tickerKey, incoming);
     return;
   }
 
   const existingConfidence = existing.confidence ?? 0;
   const incomingConfidence = incoming.confidence ?? 0;
+  const existingView = existing.viewType ?? 'unknown';
+  const incomingView = incoming.viewType ?? 'unknown';
+
   const chooseValue = <T extends number | null | undefined>(current: T, next: T): T => {
     if (next === null || next === undefined) return current;
     if (current === null || current === undefined) return next;
@@ -429,7 +450,33 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
     return current;
   };
 
-  map.set(incoming.ticker, {
+  const pickViewType = (current?: ViewType, next?: ViewType): ViewType => {
+    if (next && next !== 'unknown') return next;
+    if (current && current !== 'unknown') return current;
+    return current ?? next ?? 'unknown';
+  };
+
+  if (existingView === 'list' && incomingView === 'detail') {
+    map.set(tickerKey, {
+      ...existing,
+      ...incoming,
+      shares: incoming.shares ?? existing.shares,
+      costBasis: incoming.costBasis ?? existing.costBasis,
+      costBasisSource: incoming.costBasisSource ?? existing.costBasisSource,
+      marketValue: incoming.marketValue ?? existing.marketValue,
+      confidence: Math.max(existingConfidence, incomingConfidence),
+      viewType: 'detail',
+      selected: existing.selected ?? incoming.selected ?? true,
+      source: incoming.source ?? existing.source,
+    });
+    return;
+  }
+
+  if (existingView === 'detail' && incomingView === 'list') {
+    return;
+  }
+
+  map.set(tickerKey, {
     ...existing,
     shares: chooseValue(existing.shares, incoming.shares),
     assetType: incoming.assetType ?? existing.assetType,
@@ -441,19 +488,34 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
     marketValue: chooseValue(existing.marketValue, incoming.marketValue),
     confidence: Math.max(existingConfidence, incomingConfidence),
     source: incomingConfidence > existingConfidence && incoming.source ? incoming.source : existing.source,
+    viewType: pickViewType(existing.viewType, incoming.viewType),
+    selected: existing.selected ?? incoming.selected ?? true,
   });
 }
 
 export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[] {
+  const paragraphRows = parseHoldingsFromParagraphs(result);
+  const textRows = parseHoldingsFromPlainText(result.text ?? '');
+  const combinedCandidates = [...paragraphRows, ...textRows];
+  const viewType = classifyViewType(combinedCandidates, result.text);
+  const withViewType = combinedCandidates.map((candidate) => ({
+    ...candidate,
+    viewType: candidate.viewType && candidate.viewType !== 'unknown' ? candidate.viewType : viewType,
+  }));
+
   const byTicker = new Map<string, DraftRow>();
-
-  parseHoldingsFromParagraphs(result).forEach((candidate) => {
+  withViewType.forEach((candidate) => {
     mergeDraftRows(byTicker, candidate);
   });
-
-  parseHoldingsFromPlainText(result.text ?? '').forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
-  });
-
   return Array.from(byTicker.values());
+}
+
+export function mergeDraftLists(current: DraftRow[], incoming: DraftRow[]): DraftRow[] {
+  const map = new Map<string, DraftRow>();
+  current.forEach((draft) => {
+    const key = draft.ticker?.toUpperCase?.() ?? draft.ticker;
+    if (key) map.set(key, draft);
+  });
+  incoming.forEach((draft) => mergeDraftRows(map, draft));
+  return Array.from(map.values());
 }

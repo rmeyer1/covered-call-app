@@ -1,6 +1,7 @@
 import type { VisionAnalysisResult } from '@/lib/vision';
 
 export type PortfolioAssetType = 'equity' | 'option';
+export type ViewType = 'list' | 'detail' | 'unknown';
 
 export interface Stock {
   ticker: string;
@@ -120,6 +121,7 @@ export interface DraftHolding {
   id: string;
   ticker: string;
   shares: number | null;
+  viewType?: ViewType;
   assetType?: PortfolioAssetType;
   optionStrike?: number | null;
   optionExpiration?: string | null;
@@ -147,6 +149,7 @@ export interface RemoteDraft {
   market_value?: number | string | null;
   confidence?: number | string | null;
   source?: string | null;
+  view_type?: ViewType | null;
   selected?: boolean;
 }
 
@@ -163,6 +166,7 @@ export interface PortfolioHoldingRow {
   market_value?: number | null;
   confidence?: number | null;
   source?: string | null;
+  view_type?: ViewType | null;
   upload_id?: string | null;
   draft_id?: string | null;
   created_at: string;
@@ -186,6 +190,7 @@ export interface PortfolioHolding {
   liveGainPercent?: number | null;
   confidence?: number | null;
   source?: string | null;
+  viewType?: ViewType | null;
   uploadId?: string | null;
   draftId?: string | null;
   createdAt: string;

@@ -14,6 +14,7 @@ export function mapHoldingRow(row: PortfolioHoldingRow): PortfolioHolding {
     marketValue: row.market_value ?? null,
     confidence: row.confidence ?? null,
     source: row.source ?? null,
+    viewType: row.view_type ?? null,
     uploadId: row.upload_id ?? null,
     draftId: row.draft_id ?? null,
     createdAt: row.created_at,
