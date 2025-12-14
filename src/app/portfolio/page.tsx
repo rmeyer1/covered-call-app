@@ -31,6 +31,7 @@ const MAX_CONCURRENCY = 3;
 export default function PortfolioPage() {
   const [rawImages, setRawImages] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [rawText, setRawText] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export default function PortfolioPage() {
     setError(null);
     setSaveHoldingsError(null);
     setRawImages([]);
+    setRawText(null);
     setUploadQueue([]);
     setDrafts([]);
     setMode('upload');
@@ -230,6 +232,7 @@ export default function PortfolioPage() {
 
         updateStatus('merging');
         const parsed = parseHoldingsFromVision(data);
+        setRawText(data.text ?? null);
         if (!parsed.length) {
           throw new Error('No holdings detected in this screenshot.');
         }
