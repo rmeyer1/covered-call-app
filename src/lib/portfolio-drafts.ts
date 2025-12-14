@@ -16,14 +16,21 @@ function deriveCostBasisPerShare(
   marketValue: number | null | undefined,
   shares: number | null | undefined
 ): number | null {
-  if (typeof costBasis === 'number' && Number.isFinite(costBasis) && costBasis > 0) {
-    return costBasis;
+  const hasCost = typeof costBasis === 'number' && Number.isFinite(costBasis) && costBasis > 0;
+  const hasTotals = shares && shares > 0 && marketValue !== null && marketValue !== undefined;
+  const perShareFromTotal =
+    hasTotals && shares ? (marketValue as number) / shares : null;
+
+  // If stored cost looks wildly higher than what totals imply, trust totals instead (handles K/M OCR).
+  if (hasCost && perShareFromTotal && costBasis! > perShareFromTotal * 5) {
+    return Number.isFinite(perShareFromTotal) && perShareFromTotal > 0 ? perShareFromTotal : costBasis ?? null;
   }
-  if (!shares || shares <= 0 || marketValue === null || marketValue === undefined) {
-    return costBasis ?? null;
+
+  if (hasCost) return costBasis as number;
+  if (perShareFromTotal && Number.isFinite(perShareFromTotal) && perShareFromTotal > 0) {
+    return perShareFromTotal;
   }
-  const derived = marketValue / shares;
-  return Number.isFinite(derived) && derived > 0 ? derived : costBasis ?? null;
+  return costBasis ?? null;
 }
 
 function withDerivedCostBasisDraft(draft: DraftRow): DraftRow {
@@ -53,7 +60,11 @@ export function mergeCostBasisFromHistory(
     const tickerKey = draft.ticker?.toUpperCase?.() ?? '';
     const existing = tickerKey ? historyMap.get(tickerKey) : undefined;
     if (!existing) return draft;
-    const costBasis = draft.costBasis ?? existing.costBasis ?? null;
+
+    // Prefer cost derived from the draft's totals; fall back to OCR; then history.
+    const derivedFromDraftTotals = deriveCostBasisPerShare(draft.costBasis, draft.marketValue, draft.shares);
+    const costBasis = derivedFromDraftTotals ?? draft.costBasis ?? existing.costBasis ?? null;
+
     const marketValue =
       draft.marketValue ??
       (costBasis && draft.shares ? costBasis * draft.shares : existing.marketValue ?? null);
