@@ -112,6 +112,53 @@ function detectDetailKeywords(text?: string | null): boolean {
   return detailKeywords.some((pattern) => pattern.test(text));
 }
 
+function findLabeledCurrency(
+  lines: string[],
+  labelPattern: RegExp
+): number | null {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!labelPattern.test(line)) continue;
+    // Try same line first
+    const sameLineMatch = line.match(/\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/i);
+    if (sameLineMatch) {
+      const parsed = parseNumber(sameLineMatch[0]);
+      if (parsed !== null) return parsed;
+    }
+    // Then next non-empty line
+    for (let j = i + 1; j < Math.min(i + 3, lines.length); j += 1) {
+      if (!lines[j]) continue;
+      const nextMatch = lines[j].match(/\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/i);
+      if (nextMatch) {
+        const parsed = parseNumber(nextMatch[0]);
+        if (parsed !== null) return parsed;
+      }
+    }
+  }
+  return null;
+}
+
+function findLabeledNumber(lines: string[], labelPattern: RegExp): number | null {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!labelPattern.test(line)) continue;
+    const sameLineMatch = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/);
+    if (sameLineMatch) {
+      const parsed = parseNumber(sameLineMatch[0]);
+      if (parsed !== null) return parsed;
+    }
+    for (let j = i + 1; j < Math.min(i + 3, lines.length); j += 1) {
+      if (!lines[j]) continue;
+      const nextMatch = lines[j].match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/);
+      if (nextMatch) {
+        const parsed = parseNumber(nextMatch[0]);
+        if (parsed !== null) return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 function classifyViewType(candidates: DraftRow[], text?: string | null): ViewType {
   const distinctTickers = new Set(candidates.map((candidate) => candidate.ticker?.toUpperCase?.() ?? '')).size;
   if (distinctTickers > 3) return 'list';
@@ -402,23 +449,51 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
 
     const { source, sliceEnd } = collectContextLines(lines, index);
     const contextLines = lines.slice(index, sliceEnd);
-    const shares = extractSharesFromLines(contextLines);
+    const labeledShares = findLabeledNumber(contextLines, /shares/i);
+    const shares = labeledShares ?? extractSharesFromLines(contextLines);
     if (shares === null || shares <= 0) {
       index = sliceEnd;
       continue;
     }
 
+    const marketValueLabeled = findLabeledCurrency(contextLines, /(?:your\s+)?market\s+value/i);
+    const avgCostLabeled = findLabeledCurrency(contextLines, /average\s+cost/i);
+    const totalReturnLabeled = findLabeledCurrency(contextLines, /total\s+return/i);
     const currencyValue = extractCurrencyValue(contextLines);
     const secondaryValue = extractSecondaryValue(contextLines, shares);
-    const confidenceBase = 0.55 + (currencyValue ? 0.15 : 0) + (secondaryValue ? 0.1 : 0);
+
+    const hasLabeledCost = avgCostLabeled !== null;
+    const marketValue = marketValueLabeled ?? currencyValue ?? null;
+
+    let costBasis: number | null = null;
+    let costBasisSource: DraftRow['costBasisSource'] = undefined;
+    if (hasLabeledCost && avgCostLabeled !== null) {
+      costBasis = avgCostLabeled;
+      costBasisSource = 'ocr';
+    } else if (marketValue !== null && totalReturnLabeled !== null && shares > 0) {
+      const derived = (marketValue - totalReturnLabeled) / shares;
+      if (Number.isFinite(derived) && derived > 0) {
+        costBasis = derived;
+        costBasisSource = 'derived';
+      }
+    } else if (secondaryValue !== null && !hasLabeledCost) {
+      costBasis = secondaryValue;
+      costBasisSource = 'ocr';
+    }
+
+    const confidenceBase =
+      0.55 +
+      (marketValueLabeled ? 0.15 : currencyValue ? 0.08 : 0) +
+      (hasLabeledCost ? 0.2 : costBasisSource === 'derived' ? 0.1 : secondaryValue ? 0.05 : 0);
 
     results.push({
       id: createDraftId(),
       ticker,
       shares,
-      costBasis: secondaryValue ?? null,
-      marketValue: currencyValue ?? secondaryValue ?? null,
-      viewType: 'unknown',
+      costBasis,
+      costBasisSource,
+      marketValue,
+      viewType: detectDetailKeywords(source) ? 'detail' : 'unknown',
       confidence: Math.min(1, confidenceBase),
       source,
       selected: true,
