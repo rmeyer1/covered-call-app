@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import axios from 'axios';
 import LongCallsForm from '@/components/LongCallsForm';
@@ -95,7 +95,7 @@ export default function LongCallsPage() {
     });
   };
 
-  const fetchData = async (ticker: string, override?: PrefState) => {
+  const fetchData = useCallback(async (ticker: string, override?: PrefState) => {
     setLoading((l) => ({ ...l, [ticker]: true }));
     try {
       const pref = override || prefs[ticker] || createDefaultPref();
@@ -110,7 +110,7 @@ export default function LongCallsPage() {
     } finally {
       setLoading((l) => ({ ...l, [ticker]: false }));
     }
-  };
+  }, [prefs]);
 
   const handlePrefsChange = (ticker: string, next: PrefState) => {
     const payload: PrefState = {
@@ -138,7 +138,7 @@ export default function LongCallsPage() {
         fetchData(ticker);
       }
     });
-  }, [items, prefs]);
+  }, [items, prefs, data, loading, fetchData]);
 
   return (
     <div className="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white min-h-screen">

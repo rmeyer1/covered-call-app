@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { logError } from '@/lib/logger';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -79,7 +79,7 @@ export default function CoveredCallsPage() {
         handleGetSuggestions(ticker, wi);
       }
     });
-  }, [stocks, whatIf]);
+  }, [stocks, whatIf, suggestions, loading, handleGetSuggestions]);
 
   const saveStocks = (newStocks: Stock[]) => {
     localStorage.setItem('stocks', JSON.stringify(newStocks));
@@ -116,7 +116,7 @@ export default function CoveredCallsPage() {
     });
   };
 
-  const handleGetSuggestions = async (ticker: string, override?: WhatIfState) => {
+  const handleGetSuggestions = useCallback(async (ticker: string, override?: WhatIfState) => {
     setLoading(prev => ({ ...prev, [ticker]: true }));
     try {
       const wi = override || whatIf[ticker] || createDefaultWhatIf();
@@ -139,7 +139,10 @@ export default function CoveredCallsPage() {
         logError('getSuggestions (Axios)', details);
         try { logError('getSuggestions (Axios) stringified', JSON.stringify(details)); } catch {}
         const status = error.response?.status;
-        const serverMsg = (error.response?.data as any)?.error || error.message;
+        const serverMsg =
+          typeof error.response?.data === 'object' && error.response?.data !== null && 'error' in error.response.data
+            ? (error.response.data as { error?: string }).error
+            : error.message;
         alert(`Failed to get suggestions: ${status ?? ''} ${serverMsg}`.trim());
       } else {
         logError('getSuggestions (Unknown)', error);
@@ -148,7 +151,7 @@ export default function CoveredCallsPage() {
     } finally {
       setLoading(prev => ({ ...prev, [ticker]: false }));
     }
-  };
+  }, [whatIf]);
 
   const handleWhatIfChange = (ticker: string, next: WhatIfState) => {
     const payload: WhatIfState = {

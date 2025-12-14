@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2 } from 'lucide-react';
 import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
-import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
+import { mergeDraftRowList, parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
 import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
@@ -21,15 +21,18 @@ import {
 } from '@/lib/portfolio-drafts';
 import { usePortfolioHistory } from '@/hooks/usePortfolioHistory';
 import PortfolioDashboard from '@/components/PortfolioDashboard';
+import UploadQueue, { type UploadQueueItem, type UploadStatus } from '@/components/UploadQueue';
 
 type ViewMode = 'loading' | 'dashboard' | 'upload';
 
+const MAX_FILES = 25;
+const MAX_CONCURRENCY = 3;
 
 export default function PortfolioPage() {
-  const [rawImage, setRawImage] = useState<string | null>(null);
-  const [rawText, setRawText] = useState('');
+  const [rawImages, setRawImages] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
@@ -51,8 +54,8 @@ export default function PortfolioPage() {
   const handleStartUpload = useCallback(() => {
     setError(null);
     setSaveHoldingsError(null);
-    setRawImage(null);
-    setRawText('');
+    setRawImages([]);
+    setUploadQueue([]);
     setDrafts([]);
     setMode('upload');
   }, []);
@@ -142,60 +145,10 @@ export default function PortfolioPage() {
     [drafts, mode, historyMap]
   );
 
-  const handleFile = async (file: File) => {
-    setError(null);
-    if (!userId) {
-      setError('Cannot upload without a session. Please refresh and try again.');
-      return;
-    }
-    setUploading(true);
-    try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result;
-          if (typeof result === 'string') resolve(result);
-          else reject(new Error('Unable to read file'));
-        };
-        reader.onerror = () => reject(reader.error ?? new Error('File read error'));
-        reader.readAsDataURL(file);
-      });
-      setRawImage(base64);
-      void fetch('/api/portfolio/uploads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
-        body: JSON.stringify({ imageBase64: base64, filename: file.name, size: file.size, userId }),
-      }).catch((err) => {
-        console.error('Failed to archive screenshot', err);
-      });
-      const res = await fetch('/api/vision/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64 }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || `Vision error ${res.status}`);
-      }
-      const data = (await res.json()) as VisionAnalysisResult;
-      setRawText(data.text ?? '');
-      const parsed = hydrateDrafts(parseHoldingsFromVision(data));
-      if (!parsed.length) {
-        setError('Could not identify any holdings in the screenshot. Try a clearer image.');
-      }
-      setDrafts(parsed);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setError(message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    void handleFile(file);
+    const files = event.target.files ? Array.from(event.target.files).slice(0, MAX_FILES) : [];
+    if (!files.length) return;
+    void handleFiles(files);
     event.target.value = '';
   };
 
@@ -223,6 +176,107 @@ export default function PortfolioPage() {
   const removeDraft = (id: string) => {
     setDrafts((prev) => prev.filter((d) => d.id !== id));
   };
+
+  const mergeDrafts = useCallback(
+    (incoming: DraftRow[]) =>
+      setDrafts((prev) => {
+        const merged = mergeDraftRowList([...prev, ...incoming]);
+        return hydrateDrafts(merged);
+      }),
+    [hydrateDrafts]
+  );
+
+  const processSingleFile = useCallback(
+    async (file: File, id: string) => {
+      const updateStatus = (status: UploadStatus, errorMsg?: string | null) =>
+        setUploadQueue((prev) =>
+          prev.map((item) => (item.id === id ? { ...item, status, error: errorMsg ?? null } : item))
+        );
+
+      try {
+        updateStatus('reading');
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            if (typeof result === 'string') resolve(result);
+            else reject(new Error('Unable to read file'));
+          };
+          reader.onerror = () => reject(reader.error ?? new Error('File read error'));
+          reader.readAsDataURL(file);
+        });
+        setRawImages((prev) => [...prev, base64]);
+
+        updateStatus('uploading');
+        void fetch('/api/portfolio/uploads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId ?? '' },
+          body: JSON.stringify({ imageBase64: base64, filename: file.name, size: file.size, userId }),
+        }).catch((err) => {
+          console.error('Failed to archive screenshot', err);
+        });
+
+        updateStatus('analyzing');
+        const res = await fetch('/api/vision/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data?.error || `Vision error ${res.status}`);
+        }
+        const data = (await res.json()) as VisionAnalysisResult;
+
+        updateStatus('merging');
+        const parsed = parseHoldingsFromVision(data);
+        if (!parsed.length) {
+          throw new Error('No holdings detected in this screenshot.');
+        }
+        mergeDrafts(parsed);
+        updateStatus('done');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed';
+        updateStatus('error', message);
+        setError(message);
+      }
+    },
+    [mergeDrafts, userId]
+  );
+
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      if (!userId) {
+        setError('Cannot upload without a session. Please refresh and try again.');
+        return;
+      }
+      setError(null);
+      setUploading(true);
+      const items: UploadQueueItem[] = files.map((file) => ({
+        id: crypto.randomUUID(),
+        name: file.name,
+        status: 'queued',
+        error: null,
+      }));
+      setUploadQueue((prev) => [...prev, ...items]);
+
+      let cursor = 0;
+      const runNext = async (): Promise<void> => {
+        if (cursor >= files.length) return;
+        const index = cursor;
+        cursor += 1;
+        const file = files[index];
+        const itemId = items[index].id;
+        await processSingleFile(file, itemId);
+        await runNext();
+      };
+
+      const workers = Array.from({ length: Math.min(MAX_CONCURRENCY, files.length) }, () => runNext());
+      await Promise.all(workers);
+      setUploading(false);
+    },
+    [processSingleFile, userId]
+  );
 
   const handleCommit = async () => {
     if (!userId) {
@@ -354,25 +408,37 @@ export default function PortfolioPage() {
 
           <section className="mb-8">
             <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 cursor-pointer hover:border-blue-500 transition bg-white dark:bg-gray-800">
-              <input type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileInput} />
               <Upload size={32} className="text-blue-500" />
               <div className="text-center text-sm text-gray-600 dark:text-gray-400">
-                Drag & drop an image here, or <span className="text-blue-500">browse</span>
+                Drag & drop images here (up to {MAX_FILES}), or <span className="text-blue-500">browse</span>
               </div>
-              {uploading && <div className="text-sm text-blue-500">Analyzing screenshot…</div>}
+              {uploading && <div className="text-sm text-blue-500">Processing uploads…</div>}
             </label>
             {error && (
               <div className="mt-3 flex items-center gap-2 text-sm text-red-500">
                 <AlertCircle size={16} /> {error}
               </div>
             )}
+            {uploadQueue.length > 0 && (
+              <div className="mt-4">
+                <UploadQueue items={uploadQueue} />
+              </div>
+            )}
           </section>
 
-          {rawImage && (
+          {rawImages.length > 0 && (
             <section className="mb-8">
               <h2 className="font-semibold mb-3 text-lg">Screenshot Preview</h2>
               <div className="relative max-w-lg border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                <Image src={rawImage} alt="Uploaded screenshot" width={800} height={600} className="w-full h-auto" unoptimized />
+                <Image
+                  src={rawImages[rawImages.length - 1]}
+                  alt="Latest uploaded screenshot"
+                  width={800}
+                  height={600}
+                  className="w-full h-auto"
+                  unoptimized
+                />
               </div>
             </section>
           )}

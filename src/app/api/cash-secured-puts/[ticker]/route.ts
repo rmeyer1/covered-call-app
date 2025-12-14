@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import { getAlpacaAuth, getOptionChainByType, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
-import { callsAtExpiration, selectPutsByMoneyness, buildCspSuggestions } from '@/lib/options';
+import { callsAtExpiration, selectPutsByMoneyness, buildSuggestions } from '@/lib/options';
+import type { OptionContract } from '@/lib/options';
 import { logAxiosError } from '@/lib/logger';
 import { DEFAULT_DAYS_AHEAD, parseSelectionFromParams, pickExpirationDate } from '@/lib/expirations';
 
@@ -25,11 +26,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   }
 
   try {
-    const [currentPrice, chain, logoUrl] = await Promise.all([
+    const [currentPrice, chainRaw, logoUrl] = await Promise.all([
       getUnderlyingPrice(T),
       getOptionChainByType(T, 'put'),
       getLogoUrl(T),
     ]);
+    const chain = chainRaw as OptionContract[];
 
     const nextExp = pickExpirationDate(chain, T, expirySelection, fallbackDaysAhead);
     if (!nextExp) return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
     if (!putsAtExp?.length) return NextResponse.json({ error: 'No puts found for expiration.' }, { status: 404 });
 
     const selected = selectPutsByMoneyness(putsAtExp, currentPrice, moneyness, Math.max(1, Math.min(count, 5)));
-    const suggestions = buildCspSuggestions(selected, nextExp);
+    const suggestions = buildSuggestions(currentPrice, selected, nextExp);
 
     return NextResponse.json({ currentPrice, selectedExpiration: nextExp.toISOString().split('T')[0], suggestions, logoUrl: logoUrl ?? undefined });
   } catch (error: unknown) {

@@ -33,7 +33,6 @@ export default function CspTable({ currentPrice, suggestions, basis }: Props) {
   const [showIvTip, setShowIvTip] = useState(false);
   const [showReturnTip, setShowReturnTip] = useState(false);
   const [showAssignTip, setShowAssignTip] = useState(false);
-  const [showExtrinsicTip, setShowExtrinsicTip] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'ascending' | 'descending' }>({ key: 'strike', direction: 'descending' });
 
   const rows: Row[] = useMemo(() => {

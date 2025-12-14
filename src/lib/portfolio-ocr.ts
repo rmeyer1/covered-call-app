@@ -413,7 +413,7 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
   return results;
 }
 
-function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
+export function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
   const existing = map.get(incoming.ticker);
   if (!existing) {
     map.set(incoming.ticker, incoming);
@@ -455,5 +455,11 @@ export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[
     mergeDraftRows(byTicker, candidate);
   });
 
+  return Array.from(byTicker.values());
+}
+
+export function mergeDraftRowList(drafts: DraftRow[]): DraftRow[] {
+  const byTicker = new Map<string, DraftRow>();
+  drafts.forEach((draft) => mergeDraftRows(byTicker, draft));
   return Array.from(byTicker.values());
 }

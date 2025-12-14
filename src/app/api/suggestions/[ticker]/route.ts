@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
-import { getAlpacaAuth, getUnderlyingPrice, getLogoUrl } from '@/lib/alpaca';
-import { getStockSuggestion } from '@/lib/options';
-import { parseSelectionFromParams, DEFAULT_SUGGESTION_DAYS_AHEAD, pickExpirationDate } from '@/lib/expirations';
+import { getAlpacaAuth, getUnderlyingPrice, getLogoUrl, getOptionChainByType } from '@/lib/alpaca';
+import { callsAtExpiration, buildSuggestions } from '@/lib/options';
+import type { OptionContract } from '@/lib/options';
+import { parseSelectionFromParams, DEFAULT_DAYS_AHEAD, pickExpirationDate } from '@/lib/expirations';
 import { logAxiosError } from '@/lib/logger';
 
 export async function GET(req: NextRequest, context: { params: Promise<{ ticker: string }> }) {
   const params = await context.params;
   const ticker = params.ticker.toUpperCase();
   const sp = req.nextUrl.searchParams;
-  const requestedDaysAhead = Number(sp.get('daysAhead') ?? DEFAULT_SUGGESTION_DAYS_AHEAD);
+  const requestedDaysAhead = Number(sp.get('daysAhead') ?? DEFAULT_DAYS_AHEAD);
   const fallbackDaysAhead = Number.isFinite(requestedDaysAhead) && requestedDaysAhead > 0
     ? requestedDaysAhead
-    : DEFAULT_SUGGESTION_DAYS_AHEAD;
+    : DEFAULT_DAYS_AHEAD;
   const otmFactors = sp.get('otmFactors')?.split(',').map((n) => Number(n)).filter((n) => !Number.isNaN(n)) ?? undefined;
   const expirySelection = parseSelectionFromParams(sp, { mode: 'custom', daysAhead: fallbackDaysAhead });
 
@@ -22,16 +23,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ ticker:
   }
 
   try {
-    const [currentPrice, optionChain, logoUrl] = await Promise.all([
+    const [currentPrice, optionChainRaw, logoUrl] = await Promise.all([
       getUnderlyingPrice(ticker),
-      getStockSuggestion(ticker),
+      getOptionChainByType(ticker, 'call'),
       getLogoUrl(ticker),
     ]);
+    const optionChain = optionChainRaw as OptionContract[]; // normalized in alpaca client
 
     const nextExp = pickExpirationDate(optionChain, ticker, expirySelection, fallbackDaysAhead);
     if (!nextExp) return NextResponse.json({ error: 'No suitable expiration date found.' }, { status: 404 });
 
-    const suggestions = getStockSuggestion(ticker, currentPrice, nextExp, otmFactors);
+    const callsAtExp = callsAtExpiration(optionChain, ticker, nextExp);
+    if (!callsAtExp?.length) return NextResponse.json({ error: 'No calls found for expiration.' }, { status: 404 });
+
+    const suggestions = buildSuggestions(currentPrice, callsAtExp, nextExp, otmFactors);
     return NextResponse.json({ currentPrice, selectedExpiration: nextExp.toISOString().split('T')[0], suggestions, logoUrl: logoUrl ?? undefined });
   } catch (error: unknown) {
     logAxiosError(error, 'GET /api/suggestions/[ticker]');

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import axios from 'axios';
 import LongCallsForm from '@/components/LongCallsForm';
@@ -68,7 +68,11 @@ export default function LongPutsPage() {
 
   const handleRemove = (ticker: string) => {
     saveItems(items.filter((x) => x.ticker !== ticker));
-    setData((d) => { const c = { ...d } as any; delete c[ticker]; return c; });
+    setData((d) => {
+      const { [ticker]: _removed, ...rest } = d;
+      void _removed;
+      return rest;
+    });
     setPrefs((p) => {
       const c = { ...p } as Record<string, PrefState>;
       delete c[ticker];
@@ -77,7 +81,7 @@ export default function LongPutsPage() {
     });
   };
 
-  const fetchData = async (ticker: string, override?: PrefState) => {
+  const fetchData = useCallback(async (ticker: string, override?: PrefState) => {
     setLoading((l) => ({ ...l, [ticker]: true }));
     try {
       const pref = override || prefs[ticker] || createDefaultPref();
@@ -92,7 +96,7 @@ export default function LongPutsPage() {
     } finally {
       setLoading((l) => ({ ...l, [ticker]: false }));
     }
-  };
+  }, [prefs]);
 
   const handlePrefsChange = (ticker: string, next: PrefState) => {
     const payload: PrefState = {
@@ -104,7 +108,12 @@ export default function LongPutsPage() {
     debounceTimers.current[ticker] = window.setTimeout(() => { fetchData(ticker, payload); delete debounceTimers.current[ticker]; }, 250);
   };
 
-  useEffect(() => { if (!items.length) return; items.forEach(({ ticker }) => { if (!data[ticker] && !loading[ticker]) fetchData(ticker); }); }, [items, prefs]);
+  useEffect(() => {
+    if (!items.length) return;
+    items.forEach(({ ticker }) => {
+      if (!data[ticker] && !loading[ticker]) fetchData(ticker);
+    });
+  }, [items, prefs, data, loading, fetchData]);
 
   return (
     <div className="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white min-h-screen">
