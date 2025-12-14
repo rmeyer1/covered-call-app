@@ -388,20 +388,6 @@ function extractCurrencyValue(lines: string[]): number | null {
   return null;
 }
 
-function extractSecondaryValue(lines: string[], sharesValue: number | null): number | null {
-  const candidates: number[] = [];
-  lines.forEach((line) => {
-    if (hasPercent(line)) return;
-    const matches = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/gi) || [];
-    matches.forEach((value) => {
-      const parsed = parseNumber(value);
-      if (parsed !== null) candidates.push(parsed);
-    });
-  });
-  const unique = candidates.filter((value) => value !== sharesValue);
-  return unique[0] ?? null;
-}
-
 function parseHoldingsFromPlainText(text: string): DraftRow[] {
   const lines = text
     .split(/\n+/)
@@ -459,11 +445,8 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
     const marketValueLabeled = findLabeledCurrency(contextLines, /(?:your\s+)?market\s+value/i);
     const avgCostLabeled = findLabeledCurrency(contextLines, /average\s+cost/i);
     const totalReturnLabeled = findLabeledCurrency(contextLines, /total\s+return/i);
-    const currencyValue = extractCurrencyValue(contextLines);
-    const secondaryValue = extractSecondaryValue(contextLines, shares);
-
     const hasLabeledCost = avgCostLabeled !== null;
-    const marketValue = marketValueLabeled ?? currencyValue ?? null;
+    const marketValue = marketValueLabeled ?? null;
 
     let costBasis: number | null = null;
     let costBasisSource: DraftRow['costBasisSource'] = undefined;
@@ -476,15 +459,12 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
         costBasis = derived;
         costBasisSource = 'derived';
       }
-    } else if (secondaryValue !== null && !hasLabeledCost) {
-      costBasis = secondaryValue;
-      costBasisSource = 'ocr';
     }
 
     const confidenceBase =
       0.55 +
-      (marketValueLabeled ? 0.15 : currencyValue ? 0.08 : 0) +
-      (hasLabeledCost ? 0.2 : costBasisSource === 'derived' ? 0.1 : secondaryValue ? 0.05 : 0);
+      (marketValueLabeled ? 0.15 : 0) +
+      (hasLabeledCost ? 0.2 : costBasisSource === 'derived' ? 0.1 : 0);
 
     results.push({
       id: createDraftId(),
