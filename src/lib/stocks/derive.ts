@@ -68,6 +68,21 @@ export interface StockDetailsViewModel {
   asOf: string;
 }
 
+export interface PositionDerivationInput {
+  shares?: number | null;
+  costBasis?: number | null;
+  marketValue?: number | null;
+  livePrice?: number | null;
+}
+
+export interface PositionDerivation {
+  marketValue: number | null;
+  costBasisValue: number | null;
+  gain: number | null;
+  gainPercent: number | null;
+  portfolioPercent: number | null;
+}
+
 export function buildSummaryTile(summary?: StockDetailsSummary | null): SummaryTileView | null {
   if (!summary) return null;
   return {
@@ -144,5 +159,35 @@ export function deriveStockDetailsView(details: StockDetails | null): StockDetai
     warnings: details.warnings ?? [],
     sources: details.sources,
     asOf: details.asOf,
+  };
+}
+
+export function derivePositionMetrics(
+  input: PositionDerivationInput,
+  totalPortfolioValue?: number | null
+): PositionDerivation {
+  const shares = typeof input.shares === 'number' && Number.isFinite(input.shares) ? input.shares : null;
+  const costBasis = typeof input.costBasis === 'number' && Number.isFinite(input.costBasis) ? input.costBasis : null;
+  const providedMarketValue =
+    typeof input.marketValue === 'number' && Number.isFinite(input.marketValue) ? input.marketValue : null;
+  const livePrice = typeof input.livePrice === 'number' && Number.isFinite(input.livePrice) ? input.livePrice : null;
+
+  const marketValue = providedMarketValue ?? (shares && livePrice ? shares * livePrice : null);
+  const costBasisValue = costBasis !== null && shares ? costBasis * shares : null;
+  const gain = marketValue !== null && costBasisValue !== null ? marketValue - costBasisValue : null;
+  const gainPercent =
+    gain !== null && costBasisValue !== null && costBasisValue !== 0 ? gain / costBasisValue : null;
+
+  const portfolioPercent =
+    marketValue !== null && totalPortfolioValue
+      ? marketValue / totalPortfolioValue
+      : null;
+
+  return {
+    marketValue,
+    costBasisValue,
+    gain,
+    gainPercent,
+    portfolioPercent,
   };
 }

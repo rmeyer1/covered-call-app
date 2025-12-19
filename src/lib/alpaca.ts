@@ -6,6 +6,7 @@ import type {
   AlpacaNewsResponse,
   AlpacaBarResponse,
   AlpacaBar,
+  AlpacaAsset,
 } from '@/types/alpaca';
 import { logAxiosError, logWarn, logDebug } from '@/lib/logger';
 import { mapSnapshotsWithStrike } from '@/lib/options';
@@ -13,6 +14,7 @@ import type { OptionContract } from '@/lib/options';
 
 const ALPACA_DATA_BASE_V1BETA1 = 'https://data.alpaca.markets/v1beta1';
 const ALPACA_DATA_BASE_V2 = 'https://data.alpaca.markets/v2';
+const ALPACA_TRADING_BASE = process.env.ALPACA_TRADING_BASE_URL ?? 'https://paper-api.alpaca.markets';
 
 export function getAlpacaAuth() {
   const keyId = process.env.ALPACA_API_KEY_ID;
@@ -143,6 +145,26 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
 
   logDebug('alpaca.getOptionChain: sample', allSnapshots[0]);
   return allSnapshots;
+}
+
+export async function searchAssets(query: string, limit = 5): Promise<AlpacaAsset[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  try {
+    const headers = buildAuthHeaders();
+    const { data } = await axios.get<AlpacaAsset[]>(`${ALPACA_TRADING_BASE}/v2/assets`, {
+      headers,
+      params: {
+        search: trimmed,
+        status: 'active',
+      },
+    });
+    if (!Array.isArray(data)) return [];
+    return data.slice(0, limit);
+  } catch (err) {
+    logAxiosError(err, 'alpaca.searchAssets');
+    return [];
+  }
 }
 
 export async function getUnderlyingPrice(ticker: string) {

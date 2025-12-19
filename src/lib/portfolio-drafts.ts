@@ -1,5 +1,6 @@
 import { mapHoldingRows } from '@/lib/portfolio';
 import { parseNumber } from '@/lib/portfolio-ocr';
+import { derivePositionMetrics } from '@/lib/stocks/derive';
 import type { DraftRow, PortfolioHolding, PortfolioHoldingsResponse, RemoteDraft, Stock } from '@/types';
 
 export const USER_ID_STORAGE_KEY = 'portfolio.userId';
@@ -190,25 +191,39 @@ function applySnapshotsToHoldings(
   holdings: PortfolioHolding[],
   snapshots?: PortfolioHoldingsResponse['snapshots']
 ): PortfolioHolding[] {
-  if (!snapshots) return holdings;
-  return holdings.map((holding) => {
+  const seeded = holdings.map((holding) => {
     const snapshot = holding.ticker ? snapshots?.[holding.ticker] : undefined;
-    if (!snapshot) return holding;
-    const livePrice = snapshot.lastPrice ?? null;
-    const liveValue =
-      typeof livePrice === 'number' && Number.isFinite(livePrice) ? livePrice * (holding.shareQty ?? 0) : null;
-    const positionCost =
-      holding.costBasis && holding.shareQty ? holding.costBasis * holding.shareQty : null;
-    const liveGain =
-      liveValue !== null && positionCost !== null ? liveValue - positionCost : null;
-    const liveGainPercent =
-      liveGain !== null && positionCost ? liveGain / positionCost : null;
+    const livePrice = snapshot?.lastPrice ?? null;
+    return { holding, livePrice };
+  });
+
+  const totalMarketValue = seeded.reduce((sum, { holding, livePrice }) => {
+    const metrics = derivePositionMetrics({
+      shares: holding.shareQty,
+      costBasis: holding.costBasis,
+      marketValue: holding.marketValue,
+      livePrice,
+    });
+    return sum + (metrics.marketValue ?? 0);
+  }, 0);
+
+  return seeded.map(({ holding, livePrice }) => {
+    const metrics = derivePositionMetrics(
+      {
+        shares: holding.shareQty,
+        costBasis: holding.costBasis,
+        marketValue: holding.marketValue,
+        livePrice,
+      },
+      totalMarketValue || null
+    );
     return {
       ...holding,
       livePrice,
-      liveValue,
-      liveGain,
-      liveGainPercent,
+      liveValue: metrics.marketValue,
+      liveGain: metrics.gain,
+      liveGainPercent: metrics.gainPercent,
+      portfolioPercent: metrics.portfolioPercent,
     };
   });
 }

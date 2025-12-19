@@ -14,6 +14,16 @@ export interface AlpacaQuote {
   as?: number;
 }
 
+export interface AlpacaAsset {
+  id: string;
+  class: string;
+  exchange: string;
+  symbol: string;
+  name?: string | null;
+  status?: string | null;
+  tradable?: boolean;
+}
+
 export interface AlpacaBar {
   t: string;
   o: number;

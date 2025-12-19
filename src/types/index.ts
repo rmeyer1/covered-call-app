@@ -186,6 +186,7 @@ export interface PortfolioHolding {
   liveValue?: number | null;
   liveGain?: number | null;
   liveGainPercent?: number | null;
+  portfolioPercent?: number | null;
   confidence?: number | null;
   source?: string | null;
   uploadId?: string | null;

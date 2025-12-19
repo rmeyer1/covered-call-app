@@ -140,6 +140,7 @@ export default function PortfolioDashboard({
                     <th className="p-3 text-left">Cost Basis / Share</th>
                     <th className="p-3 text-left">Live Price</th>
                     <th className="p-3 text-left">Live Value</th>
+                    <th className="p-3 text-left">Portfolio %</th>
                     <th className="p-3 text-left">P&L</th>
                     <th className="p-3 text-left">Confidence</th>
                     <th className="p-3 text-left">Source</th>
@@ -173,6 +174,7 @@ export default function PortfolioDashboard({
                       <td className="p-3">{formatCurrency(holding.costBasis)}</td>
                       <td className="p-3">{formatCurrency(holding.livePrice)}</td>
                       <td className="p-3">{formatCurrency(holding.liveValue ?? holding.marketValue)}</td>
+                      <td className="p-3">{formatPercent(holding.portfolioPercent)}</td>
                       <td className="p-3">
                         <div className={(holding.liveGain ?? 0) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
                           <div>{formatCurrency(holding.liveGain)}</div>
