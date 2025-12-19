@@ -148,7 +148,7 @@ export default function LongPutsTable({ currentPrice, suggestions }: Props) {
                   <td className="px-4 sm:px-6 py-2 sm:py-3">
                     <div className="flex items-center gap-2">
                       <span>${extrinsic.toFixed(2)}</span>
-                      <ThetaBadge theta={row.theta ?? null} />
+                      <ThetaBadge theta={row.theta ?? undefined} />
                     </div>
                   </td>
                 </tr>

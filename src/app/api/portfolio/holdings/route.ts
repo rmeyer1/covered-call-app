@@ -70,6 +70,7 @@ async function fetchSnapshots(
         return [
           ticker,
           {
+            ticker,
             lastPrice,
             prevClose,
             change,

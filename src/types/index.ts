@@ -128,6 +128,8 @@ export interface DraftHolding {
   marketValue?: number | null;
   confidence?: number | null;
   source?: string;
+  uploadId?: string | null;
+  uploadName?: string | null;
 }
 
 export interface DraftRow extends DraftHolding {
