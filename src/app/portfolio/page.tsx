@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2 } from 'lucide-react';
+import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2, Shuffle } from 'lucide-react';
 import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
@@ -10,11 +10,13 @@ import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
   applyDerivedCostBasisToDrafts,
+  draftGroupingKey,
   formatConfidence,
   isDraftReady,
   loadDraftsLocal,
   loadDraftsRemote,
   mergeCostBasisFromHistory,
+  mergeDraftRows,
   mergeStocksFromDrafts,
   persistDraftsLocal,
   saveDraftsRemote,
@@ -24,11 +26,19 @@ import PortfolioDashboard from '@/components/PortfolioDashboard';
 
 type ViewMode = 'loading' | 'dashboard' | 'upload';
 
+interface UploadPreview {
+  id: string;
+  name: string;
+  image: string;
+  path?: string | null;
+}
 
 export default function PortfolioPage() {
-  const [rawImage, setRawImage] = useState<string | null>(null);
-  const [rawText, setRawText] = useState('');
+  const [rawTexts, setRawTexts] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [mergedDrafts, setMergedDrafts] = useState<DraftRow[]>([]);
+  const [mergeAccounts, setMergeAccounts] = useState(true);
+  const [previews, setPreviews] = useState<UploadPreview[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -48,12 +58,36 @@ export default function PortfolioPage() {
     void refreshHoldings();
   }, [refreshHoldings]);
 
+  const findGroupKeyForDraft = useCallback(
+    (id: string) => {
+      const direct = drafts.find((draft) => draft.id === id);
+      if (direct) return draftGroupingKey(direct);
+      const merged = mergedDrafts.find((draft) => draft.id === id);
+      return merged ? draftGroupingKey(merged) : null;
+    },
+    [drafts, mergedDrafts]
+  );
+
+  const applyDraftUpdate = useCallback(
+    (updater: (current: DraftRow[]) => DraftRow[]) => {
+      setDrafts((previous) => {
+        const next = applyDerivedCostBasisToDrafts(updater(previous));
+        if (mergeAccounts) {
+          setMergedDrafts((prevMerged) => mergeDraftRows(next, prevMerged));
+        }
+        return next;
+      });
+    },
+    [mergeAccounts]
+  );
+
   const handleStartUpload = useCallback(() => {
     setError(null);
     setSaveHoldingsError(null);
-    setRawImage(null);
-    setRawText('');
+    setRawTexts([]);
+    setPreviews([]);
     setDrafts([]);
+    setMergedDrafts([]);
     setMode('upload');
   }, []);
 
@@ -103,6 +137,11 @@ export default function PortfolioPage() {
   }, [holdingsError, mode]);
 
   useEffect(() => {
+    if (!mergeAccounts) return;
+    setMergedDrafts((previous) => mergeDraftRows(drafts, previous));
+  }, [drafts, mergeAccounts]);
+
+  useEffect(() => {
     if (!userId || mode !== 'upload') return;
     void (async () => {
       const remote = await loadDraftsRemote(userId);
@@ -121,69 +160,106 @@ export default function PortfolioPage() {
     void saveDraftsRemote(drafts, true, userId);
   }, [drafts, userId, mode]);
 
+  const activeDrafts = mergeAccounts ? mergedDrafts : drafts;
+
   const selectedCount = useMemo(
-    () => (mode === 'upload' ? drafts.filter((draft) => draft.selected).length : 0),
-    [drafts, mode]
+    () => (mode === 'upload' ? activeDrafts.filter((draft) => draft.selected).length : 0),
+    [activeDrafts, mode]
   );
   const readyCount = useMemo(
-    () => (mode === 'upload' ? drafts.filter((draft) => draft.selected && isDraftReady(draft)).length : 0),
-    [drafts, mode]
+    () => (mode === 'upload' ? activeDrafts.filter((draft) => draft.selected && isDraftReady(draft)).length : 0),
+    [activeDrafts, mode]
   );
   const missingCostCount = useMemo(
     () =>
       mode === 'upload'
-        ? drafts.filter((draft) => {
+        ? activeDrafts.filter((draft) => {
             if (!draft.selected) return false;
             const historyHolding = historyMap.get(draft.ticker.toUpperCase());
             const resolved = draft.costBasis ?? historyHolding?.costBasis ?? null;
             return resolved === null || resolved === undefined;
           }).length
         : 0,
-    [drafts, mode, historyMap]
+    [activeDrafts, mode, historyMap]
   );
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: FileList | File[]) => {
     setError(null);
     if (!userId) {
       setError('Cannot upload without a session. Please refresh and try again.');
       return;
     }
+    const fileArray = Array.from(files);
+    if (!fileArray.length) return;
     setUploading(true);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result;
-          if (typeof result === 'string') resolve(result);
-          else reject(new Error('Unable to read file'));
-        };
-        reader.onerror = () => reject(reader.error ?? new Error('File read error'));
-        reader.readAsDataURL(file);
-      });
-      setRawImage(base64);
-      void fetch('/api/portfolio/uploads', {
+      const prepared = await Promise.all(
+        fileArray.map(
+          (file) =>
+            new Promise<{ file: File; base64: string }>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result;
+                if (typeof result === 'string') resolve({ file, base64: result });
+                else reject(new Error('Unable to read file'));
+              };
+              reader.onerror = () => reject(reader.error ?? new Error('File read error'));
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+
+      const uploadPayload = prepared.map(({ file, base64 }) => ({
+        imageBase64: base64,
+        filename: file.name,
+        size: file.size,
+        userId,
+      }));
+
+      const uploadRes = await fetch('/api/portfolio/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
-        body: JSON.stringify({ imageBase64: base64, filename: file.name, size: file.size, userId }),
-      }).catch((err) => {
-        console.error('Failed to archive screenshot', err);
+        body: JSON.stringify({ uploads: uploadPayload, userId }),
       });
-      const res = await fetch('/api/vision/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64 }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || `Vision error ${res.status}`);
+      const uploadData = await uploadRes.json().catch(() => ({}));
+      const uploadRecords: Array<{ id?: string; path?: string; filename?: string | null }> =
+        Array.isArray(uploadData?.uploads) ? uploadData.uploads : [];
+
+      const parsedDrafts: DraftRow[] = [];
+      for (const [index, item] of prepared.entries()) {
+        const uploadMeta = uploadRecords[index] ?? {};
+        const visionRes = await fetch('/api/vision/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: item.base64 }),
+        });
+        if (!visionRes.ok) {
+          const data = await visionRes.json().catch(() => ({}));
+          throw new Error(data?.error || `Vision error ${visionRes.status}`);
+        }
+        const data = (await visionRes.json()) as VisionAnalysisResult;
+        setRawTexts((prev) => [...prev, data.text ?? '']);
+        const parsed = hydrateDrafts(parseHoldingsFromVision(data)).map((draft) => ({
+          ...draft,
+          uploadId: uploadMeta?.id ?? uploadMeta?.path ?? null,
+          uploadName: uploadMeta?.filename ?? item.file.name,
+        }));
+        parsedDrafts.push(...parsed);
+        setPreviews((prev) => [
+          ...prev,
+          {
+            id: uploadMeta?.id ?? item.file.name ?? String(index),
+            name: item.file.name,
+            image: item.base64,
+            path: uploadMeta?.path,
+          },
+        ]);
       }
-      const data = (await res.json()) as VisionAnalysisResult;
-      setRawText(data.text ?? '');
-      const parsed = hydrateDrafts(parseHoldingsFromVision(data));
-      if (!parsed.length) {
-        setError('Could not identify any holdings in the screenshot. Try a clearer image.');
+
+      if (!parsedDrafts.length) {
+        setError('Could not identify any holdings in the uploaded files. Try clearer images.');
       }
-      setDrafts(parsed);
+      applyDraftUpdate((prev) => hydrateDrafts([...prev, ...parsedDrafts]));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed';
       setError(message);
@@ -193,35 +269,73 @@ export default function PortfolioPage() {
   };
 
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    void handleFile(file);
+    const files = event.target.files;
+    if (!files?.length) return;
+    void handleFiles(files);
     event.target.value = '';
   };
 
   const handleDraftChange = (id: string, field: keyof DraftHolding, value: string) => {
-    setDrafts((prev) =>
-      applyDerivedCostBasisToDrafts(
-        prev.map((draft) =>
-          draft.id === id
-            ? {
-                ...draft,
-                [field]: field === 'ticker' ? value.toUpperCase() : parseNumber(value),
-                costBasisSource:
-                  field === 'costBasis' ? 'manual' : draft.costBasisSource,
-              }
-            : draft
-        )
-      )
-    );
+    const toDraftValue = (draft: DraftRow) => ({
+      ...draft,
+      [field]: field === 'ticker' ? value.toUpperCase() : parseNumber(value),
+      costBasisSource: field === 'costBasis' ? 'manual' : draft.costBasisSource,
+    });
+
+    if (mergeAccounts) {
+      const groupKey = findGroupKeyForDraft(id);
+      if (!groupKey) return;
+      applyDraftUpdate((list) => {
+        const group = list.filter((draft) => draftGroupingKey(draft) === groupKey);
+        if (!group.length) return list;
+        if (field === 'shares') {
+          const nextShares = parseNumber(value);
+          const currentTotal = group.reduce((sum, draft) => sum + (draft.shares ?? 0), 0);
+          const divisor = group.length || 1;
+          return list.map((draft) => {
+            if (draftGroupingKey(draft) !== groupKey) return draft;
+            const distributed =
+              nextShares === null
+                ? null
+                : currentTotal > 0
+                  ? (draft.shares ?? 0) * (nextShares / currentTotal)
+                  : nextShares / divisor;
+            return {
+              ...draft,
+              shares: distributed,
+            };
+          });
+        }
+        return list.map((draft) => (draftGroupingKey(draft) === groupKey ? toDraftValue(draft) : draft));
+      });
+      return;
+    }
+
+    applyDraftUpdate((list) => list.map((draft) => (draft.id === id ? toDraftValue(draft) : draft)));
   };
 
   const toggleSelected = (id: string) => {
-    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, selected: !d.selected } : d)));
+    if (mergeAccounts) {
+      const groupKey = findGroupKeyForDraft(id);
+      if (!groupKey) return;
+      applyDraftUpdate((prev) =>
+        prev.map((draft) =>
+          draftGroupingKey(draft) === groupKey ? { ...draft, selected: !draft.selected } : draft
+        )
+      );
+      return;
+    }
+    applyDraftUpdate((prev) => prev.map((d) => (d.id === id ? { ...d, selected: !d.selected } : d)));
   };
 
   const removeDraft = (id: string) => {
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
+    if (mergeAccounts) {
+      const groupKey = findGroupKeyForDraft(id);
+      if (!groupKey) return;
+      applyDraftUpdate((prev) => prev.filter((draft) => draftGroupingKey(draft) !== groupKey));
+      return;
+    }
+    applyDraftUpdate((prev) => prev.filter((d) => d.id !== id));
   };
 
   const handleCommit = async () => {
@@ -229,7 +343,8 @@ export default function PortfolioPage() {
       setError('Cannot save holdings without a session. Please refresh and try again.');
       return;
     }
-    const readyDrafts = drafts.filter((draft) => draft.selected && isDraftReady(draft));
+    const workingDrafts = mergeAccounts ? mergedDrafts : drafts;
+    const readyDrafts = workingDrafts.filter((draft) => draft.selected && isDraftReady(draft));
     if (!readyDrafts.length) {
       setSaveHoldingsError('Select at least one holding with a valid share count.');
       return;
@@ -273,6 +388,7 @@ export default function PortfolioPage() {
           confidence: draft.confidence ?? existing?.confidence ?? null,
           source: draft.source ?? existing?.source ?? null,
           draftId: draft.id,
+          uploadId: draft.uploadId ?? existing?.uploadId ?? null,
         };
       });
 
@@ -294,10 +410,19 @@ export default function PortfolioPage() {
       }
 
       mergeStocksFromDrafts(readyDrafts);
-      const readyIds = new Set(readyDrafts.map((draft) => draft.id));
-      const kept = drafts.filter((draft) => !readyIds.has(draft.id));
-      setDrafts(kept);
-      await saveDraftsRemote(kept, true, userId);
+      if (mergeAccounts) {
+        const readyKeys = new Set(readyDrafts.map((draft) => draftGroupingKey(draft)));
+        const keptRaw = drafts.filter((draft) => !readyKeys.has(draftGroupingKey(draft)));
+        const keptMerged = mergedDrafts.filter((draft) => !readyKeys.has(draftGroupingKey(draft)));
+        setDrafts(keptRaw);
+        setMergedDrafts(keptMerged);
+        await saveDraftsRemote(keptRaw, true, userId);
+      } else {
+        const readyIds = new Set(readyDrafts.map((draft) => draft.id));
+        const kept = drafts.filter((draft) => !readyIds.has(draft.id));
+        setDrafts(kept);
+        await saveDraftsRemote(kept, true, userId);
+      }
       await refreshHoldings();
       setMode('dashboard');
     } catch (err) {
@@ -354,10 +479,10 @@ export default function PortfolioPage() {
 
           <section className="mb-8">
             <label className="flex flex-col items-center justify-center gap-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 cursor-pointer hover:border-blue-500 transition bg-white dark:bg-gray-800">
-              <input type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handleFileInput} />
               <Upload size={32} className="text-blue-500" />
               <div className="text-center text-sm text-gray-600 dark:text-gray-400">
-                Drag & drop an image here, or <span className="text-blue-500">browse</span>
+                Drag & drop images here, or <span className="text-blue-500">browse</span> (multi-file supported)
               </div>
               {uploading && <div className="text-sm text-blue-500">Analyzing screenshot…</div>}
             </label>
@@ -368,31 +493,66 @@ export default function PortfolioPage() {
             )}
           </section>
 
-          {rawImage && (
+          {previews.length > 0 && (
             <section className="mb-8">
-              <h2 className="font-semibold mb-3 text-lg">Screenshot Preview</h2>
-              <div className="relative max-w-lg border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                <Image src={rawImage} alt="Uploaded screenshot" width={800} height={600} className="w-full h-auto" unoptimized />
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold text-lg">Upload Previews</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{previews.length} file{previews.length === 1 ? '' : 's'}</p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {previews.map((preview) => (
+                  <article
+                    key={preview.id}
+                    className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800"
+                  >
+                    <div className="relative h-48 bg-gray-100 dark:bg-gray-900">
+                      <Image
+                        src={preview.image}
+                        alt={preview.name}
+                        fill
+                        className="object-contain p-3"
+                        unoptimized
+                      />
+                    </div>
+                    <div className="px-3 py-2 text-sm text-gray-700 dark:text-gray-200">
+                      <p className="font-semibold truncate">{preview.name}</p>
+                      {preview.path && <p className="text-xs text-gray-500">{preview.path}</p>}
+                    </div>
+                  </article>
+                ))}
               </div>
             </section>
           )}
 
-          {drafts.length > 0 && (
+          {activeDrafts.length > 0 && (
             <section className="mb-10">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <h2 className="text-lg font-semibold">
                   Detected Holdings ({selectedCount} selected, {readyCount} ready)
                 </h2>
-                <button
-                  onClick={() => {
-                    void handleCommit();
-                  }}
-                  disabled={!readyCount || savingHoldings}
-                  className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-sm font-semibold px-4 py-2 rounded-md transition"
-                >
-                  {savingHoldings ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                  {savingHoldings ? 'Saving…' : 'Add to My Holdings'}
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={mergeAccounts}
+                      onChange={(e) => setMergeAccounts(e.target.checked)}
+                    />
+                    <span className="inline-flex items-center gap-1">
+                      <Shuffle size={14} /> Merge Accounts
+                    </span>
+                  </label>
+                  <button
+                    onClick={() => {
+                      void handleCommit();
+                    }}
+                    disabled={!readyCount || savingHoldings}
+                    className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white text-sm font-semibold px-4 py-2 rounded-md transition"
+                  >
+                    {savingHoldings ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                    {savingHoldings ? 'Saving…' : 'Add to My Holdings'}
+                  </button>
+                </div>
               </div>
               {selectedCount > 0 && readyCount === 0 && (
                 <p className="mb-3 text-sm text-amber-600 dark:text-amber-400">
@@ -425,7 +585,7 @@ export default function PortfolioPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {drafts.map((draft) => {
+                    {activeDrafts.map((draft) => {
                       const historyHolding = historyMap.get(draft.ticker.toUpperCase());
                       const resolvedCostBasis = draft.costBasis ?? historyHolding?.costBasis ?? null;
                       const costBasisMissing = resolvedCostBasis === null || resolvedCostBasis === undefined;
@@ -499,6 +659,7 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
                           <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
+                            {draft.uploadName ? `${draft.uploadName}${draft.source ? ' — ' : ''}` : ''}
                             {draft.source}
                           </td>
                           <td className="p-3">
@@ -519,11 +680,11 @@ export default function PortfolioPage() {
             </section>
           )}
 
-          {rawText && (
+          {rawTexts.length > 0 && (
             <section className="mb-12">
               <h2 className="text-lg font-semibold mb-2">Raw OCR Text</h2>
               <pre className="bg-gray-900 text-gray-100 text-xs sm:text-sm rounded-lg p-4 overflow-auto max-h-60 whitespace-pre-wrap">
-                {rawText}
+                {rawTexts.join('\n\n---\n\n')}
               </pre>
             </section>
           )}

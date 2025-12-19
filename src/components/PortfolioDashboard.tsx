@@ -81,7 +81,7 @@ export default function PortfolioDashboard({
             className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-semibold transition"
           >
             <Upload size={16} />
-            Upload New Snapshot
+            Upload Snapshots
           </button>
           {onRefresh && (
             <button

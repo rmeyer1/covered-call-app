@@ -1,12 +1,6 @@
 import { mapHoldingRows } from '@/lib/portfolio';
 import { parseNumber } from '@/lib/portfolio-ocr';
-import type {
-  DraftRow,
-  PortfolioHolding,
-  PortfolioHoldingsResponse,
-  RemoteDraft,
-  Stock,
-} from '@/types';
+import type { DraftRow, PortfolioHolding, PortfolioHoldingsResponse, RemoteDraft, Stock } from '@/types';
 
 export const USER_ID_STORAGE_KEY = 'portfolio.userId';
 export const USER_HEADER_KEY = 'x-portfolio-user-id';
@@ -95,6 +89,101 @@ function withDerivedCostBasisHolding(holding: PortfolioHolding): PortfolioHoldin
 
 export function applyDerivedCostBasisToHoldings(holdings: PortfolioHolding[]): PortfolioHolding[] {
   return holdings.map((holding) => withDerivedCostBasisHolding(holding));
+}
+
+export function draftGroupingKey(draft: DraftRow): string {
+  const base = `${draft.ticker?.toUpperCase?.() ?? ''}|${draft.assetType ?? 'equity'}`;
+  if (draft.assetType !== 'option') return base;
+  return `${base}|${draft.optionStrike ?? 'na'}|${draft.optionExpiration ?? 'na'}|${draft.optionRight ?? 'na'}`;
+}
+
+function aggregateCostBasis(
+  drafts: DraftRow[]
+): { costBasis: number | null; marketValue: number | null } {
+  if (!drafts.length) return { costBasis: null, marketValue: null };
+  const entries = drafts.filter((draft) => draft.costBasis !== null && draft.costBasis !== undefined);
+  const totalShares = drafts.reduce((sum, draft) => sum + (draft.shares ?? 0), 0);
+  if (entries.length && totalShares > 0) {
+    const weightedCost = entries.reduce(
+      (sum, draft) => sum + (draft.costBasis ?? 0) * (draft.shares ?? 0),
+      0
+    );
+    const costBasis = weightedCost / totalShares;
+    const marketValue = drafts.reduce((sum, draft) => {
+      const value =
+        draft.marketValue ??
+        (draft.costBasis && draft.shares ? draft.costBasis * draft.shares : null);
+      return sum + (value ?? 0);
+    }, 0);
+    return { costBasis, marketValue: marketValue || null };
+  }
+
+  if (entries.length) {
+    const costBasis =
+      entries.reduce((sum, draft) => sum + (draft.costBasis ?? 0), 0) / entries.length;
+    const marketValue = drafts.reduce((sum, draft) => sum + (draft.marketValue ?? 0), 0) || null;
+    return { costBasis, marketValue };
+  }
+
+  const inferredMarket =
+    drafts.reduce((sum, draft) => sum + (draft.marketValue ?? 0), 0) || null;
+  return { costBasis: null, marketValue: inferredMarket };
+}
+
+export function mergeDraftRows(
+  drafts: DraftRow[],
+  previousMerged?: DraftRow[]
+): DraftRow[] {
+  const byKey = new Map<string, DraftRow[]>();
+  drafts.forEach((draft) => {
+    const key = draftGroupingKey(draft);
+    const group = byKey.get(key) ?? [];
+    group.push(draft);
+    byKey.set(key, group);
+  });
+
+  const previousMap = new Map((previousMerged ?? []).map((draft) => [draftGroupingKey(draft), draft]));
+
+  const merged = Array.from(byKey.entries()).map(([key, group]) => {
+    const previous = previousMap.get(key);
+    const shares = group.reduce((sum, draft) => sum + (draft.shares ?? 0), 0);
+    const confidence = Math.max(...group.map((draft) => draft.confidence ?? 0));
+    const selected = group.some((draft) => draft.selected);
+    const uploadNames = Array.from(
+      new Set(group.map((draft) => draft.uploadName).filter(Boolean) as string[])
+    );
+    const { costBasis, marketValue } = aggregateCostBasis(group);
+    const base: DraftRow = {
+      id: previous?.id ?? key,
+      ticker: group[0]?.ticker ?? '',
+      shares,
+      assetType: group[0]?.assetType ?? 'equity',
+      optionStrike: group[0]?.optionStrike ?? null,
+      optionExpiration: group[0]?.optionExpiration ?? null,
+      optionRight: group[0]?.optionRight ?? null,
+      costBasis,
+      costBasisSource: previous?.costBasisSource ?? group[0]?.costBasisSource ?? 'derived',
+      marketValue,
+      confidence,
+      source: previous?.source ?? group[0]?.source,
+      selected: previous?.selected ?? selected,
+      uploadId: null,
+      uploadName: uploadNames.length > 1 ? `Multiple (${uploadNames.length})` : uploadNames[0] ?? null,
+    };
+    if (previous) {
+      return {
+        ...base,
+        shares: previous.shares ?? base.shares,
+        costBasis: previous.costBasis ?? base.costBasis,
+        marketValue: previous.marketValue ?? base.marketValue,
+        selected: previous.selected,
+        source: previous.source ?? base.source,
+      };
+    }
+    return base;
+  });
+
+  return applyDerivedCostBasisToDrafts(merged);
 }
 
 function applySnapshotsToHoldings(
