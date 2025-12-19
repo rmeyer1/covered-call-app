@@ -341,7 +341,7 @@ function findValueNearLabel(
     })
     .filter((entry): entry is { candidate: OcrNumericCandidate; rect: BoundingRect } => entry !== null);
 
-  let best: { candidate: OcrNumericCandidate; score: number } | null = null;
+  let best: { candidate: OcrNumericCandidate; score: number } | undefined;
 
   labels.forEach((label) => {
     numerics.forEach(({ candidate, rect }) => {
