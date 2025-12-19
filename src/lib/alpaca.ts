@@ -9,6 +9,7 @@ import type {
 } from '@/types/alpaca';
 import { logAxiosError, logWarn, logDebug } from '@/lib/logger';
 import { mapSnapshotsWithStrike } from '@/lib/options';
+import type { OptionContract } from '@/lib/options';
 
 const ALPACA_DATA_BASE_V1BETA1 = 'https://data.alpaca.markets/v1beta1';
 const ALPACA_DATA_BASE_V2 = 'https://data.alpaca.markets/v2';
@@ -99,12 +100,12 @@ export async function getNews(symbol: string, limit = 5) {
   }
 }
 
-export async function getOptionChain(ticker: string) {
+export async function getOptionChain(ticker: string): Promise<OptionContract[]> {
   return getOptionChainByType(ticker, 'call');
 }
 
-export async function getOptionChainByType(ticker: string, type: 'call' | 'put') {
-  let allSnapshots: Record<string, unknown>[] = [];
+export async function getOptionChainByType(ticker: string, type: 'call' | 'put'): Promise<OptionContract[]> {
+  let allSnapshots: OptionContract[] = [];
   let next_page_token: string | null = null;
 
   do {
@@ -125,7 +126,7 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
       throw err;
     }
 
-    const snapshots = res?.data?.snapshots as Record<string, unknown> | undefined;
+    const snapshots = res?.data?.snapshots as Record<string, OptionContract | Record<string, unknown>> | undefined;
     if (!snapshots || Object.keys(snapshots).length === 0) {
       logWarn('alpaca.getOptionChain: no snapshots', {
         ticker,

@@ -13,6 +13,13 @@ interface UploadRecord {
   checksum?: string | null;
 }
 
+type UploadPayload = {
+  imageBase64?: string;
+  filename?: string;
+  checksum?: string;
+  size?: number;
+};
+
 function resolveUserId(req: NextRequest, bodyUserId?: unknown): string | null {
   const headerUserId = req.headers.get(USER_ID_HEADER);
   if (typeof bodyUserId === 'string' && bodyUserId.trim()) return bodyUserId.trim();
@@ -78,10 +85,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
-    const uploadsPayload = Array.isArray(body?.uploads) ? body.uploads : null;
+    const uploadsPayload = Array.isArray(body?.uploads) ? (body.uploads as UploadPayload[]) : null;
     if (uploadsPayload && uploadsPayload.length) {
       const uploads = await Promise.all(
-        uploadsPayload.map(async (item) => {
+        uploadsPayload.map(async (item: UploadPayload) => {
           if (!item?.imageBase64 || typeof item.imageBase64 !== 'string') {
             throw new Error('imageBase64 is required for each upload');
           }

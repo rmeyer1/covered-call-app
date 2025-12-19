@@ -58,7 +58,37 @@ export function buildSuggestions(currentPrice: number, calls: OptionContract[], 
   });
 }
 
-export function mapSnapshotsWithStrike(snapshots: Record<string, OptionContract | Record<string, unknown>>) {
+export function buildCspSuggestions(selectedPuts: OptionContract[], nextExp: Date) {
+  const dte = differenceInDays(nextExp, new Date());
+  return selectedPuts.map((p) => {
+    const bid = p?.latestQuote?.bp ?? null;
+    const ask = p?.latestQuote?.ap ?? null;
+    const premium = ((bid ?? 0) + (ask ?? 0)) / 2 || ask || bid || 0;
+    const strike = p.strike_price;
+    const returnPct = strike ? (premium / strike) * 100 : 0;
+    const returnAnnualized = returnPct * (365 / Math.max(1, dte));
+
+    return {
+      strike,
+      premium,
+      bid,
+      ask,
+      delta: p?.greeks?.delta ?? null,
+      theta: p?.greeks?.theta ?? null,
+      gamma: p?.greeks?.gamma ?? null,
+      vega: p?.greeks?.vega ?? null,
+      impliedVolatility: p?.impliedVolatility ?? null,
+      returnPct: returnPct.toFixed(2),
+      returnAnnualized: returnAnnualized.toFixed(2),
+      breakeven: strike - premium,
+      dte,
+    };
+  });
+}
+
+export function mapSnapshotsWithStrike(
+  snapshots: Record<string, OptionContract | Record<string, unknown>>
+): OptionContract[] {
   return Object.entries(snapshots).map(([symbol, snapshot]) => {
     const strikePart = symbol.slice(-8);
     const strike_price = parseInt(strikePart, 10) / 1000;

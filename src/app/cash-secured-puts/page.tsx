@@ -178,7 +178,9 @@ export default function CashSecuredPutsPage() {
                 </div>
 
                 <CspControls
-                  value={pref}
+                  expiry={pref.expiry}
+                  moneyness={pref.moneyness}
+                  basis={pref.basis}
                   onChange={(next) => handlePrefsChange(ticker, next)}
                 />
 
