@@ -533,6 +533,20 @@ function extractFieldValue(text: string, label: string): number | null {
   return parseNumber(match?.[1] ?? null);
 }
 
+async function resolveTickerForName(name: string): Promise<string | null> {
+  if (typeof window === 'undefined') {
+    return resolveTickerFromName(name);
+  }
+  try {
+    const res = await fetch(`/api/stocks/resolve?name=${encodeURIComponent(name)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { symbol?: string | null };
+    return data?.symbol ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<DraftRow[]> {
   const text = result.text ?? '';
   const lines = text
@@ -545,7 +559,7 @@ async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<Dra
   const inlineTicker = normalizeTicker(stripped, { allowSingleLetter: true });
   let ticker = inlineTicker;
   if (!ticker && firstLine) {
-    ticker = await resolveTickerFromName(firstLine);
+    ticker = await resolveTickerForName(firstLine);
     if (!ticker) {
       logWarn('ocr.singleStock: unable to resolve ticker', { name: firstLine });
       return [];
