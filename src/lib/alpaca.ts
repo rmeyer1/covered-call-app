@@ -13,6 +13,10 @@ import type { OptionContract } from '@/lib/options';
 
 const ALPACA_DATA_BASE_V1BETA1 = 'https://data.alpaca.markets/v1beta1';
 const ALPACA_DATA_BASE_V2 = 'https://data.alpaca.markets/v2';
+const ALPACA_TRADING_BASE =
+  process.env.ALPACA_TRADING_API_URL ??
+  process.env.ALPACA_API_BASE_URL ??
+  'https://api.alpaca.markets';
 
 export function getAlpacaAuth() {
   const keyId = process.env.ALPACA_API_KEY_ID;
@@ -58,7 +62,7 @@ type AlpacaAsset = {
 };
 
 export async function listAssets(): Promise<AlpacaAsset[]> {
-  return get<AlpacaAsset[]>(`https://api.alpaca.markets/v2/assets`, {
+  return get<AlpacaAsset[]>(`${ALPACA_TRADING_BASE}/v2/assets`, {
     status: 'active',
   });
 }
