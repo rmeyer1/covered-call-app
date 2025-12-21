@@ -1,6 +1,7 @@
 import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import type { GeminiHoldingsResult } from '@/lib/gemini';
+import { logInfo } from '@/lib/logger';
 
 const headerKeywords = new Set([
   'TICKER',
@@ -132,6 +133,7 @@ function mapGeminiHoldingToDraftRow(holding: GeminiHoldingsResult['holdings'][nu
     marketValue,
     confidence: Math.min(1, Math.max(0.2, confidence ?? 0.85)),
     source: holding.sourceText ?? 'gemini',
+    parseMode: 'gemini',
     selected: true,
   } satisfies DraftRow;
 }
@@ -324,6 +326,7 @@ function buildDraftRowFromParagraph(
     marketValue: resolvedMarketValue,
     confidence,
     source: paragraph.text,
+    parseMode: 'heuristic',
     selected: true,
   } satisfies DraftRow;
 }
@@ -415,21 +418,22 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       const currencyValue = extractCurrencyValue(contextLines);
       const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
 
-      results.push({
-        id: createDraftId(),
-        ticker: option.ticker,
-        shares,
-        assetType: 'option',
+    results.push({
+      id: createDraftId(),
+      ticker: option.ticker,
+      shares,
+      assetType: 'option',
         optionStrike: option.strike,
         optionExpiration: option.expiration,
         optionRight: option.right,
         costBasis: currencyValue ?? null,
-        costBasisSource: currencyValue ? 'ocr' : undefined,
-        marketValue: currencyValue ?? null,
-        confidence: Math.min(1, confidenceBase),
-        source,
-        selected: true,
-      });
+      costBasisSource: currencyValue ? 'ocr' : undefined,
+      marketValue: currencyValue ?? null,
+      confidence: Math.min(1, confidenceBase),
+      source,
+      parseMode: 'heuristic',
+      selected: true,
+    });
 
       index = sliceEnd;
       continue;
@@ -461,6 +465,7 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       marketValue: currencyValue ?? secondaryValue ?? null,
       confidence: Math.min(1, confidenceBase),
       source,
+      parseMode: 'heuristic',
       selected: true,
     });
 
@@ -498,23 +503,72 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
     marketValue: chooseValue(existing.marketValue, incoming.marketValue),
     confidence: Math.max(existingConfidence, incomingConfidence),
     source: incomingConfidence > existingConfidence && incoming.source ? incoming.source : existing.source,
+    parseMode:
+      incomingConfidence > existingConfidence + 0.05
+        ? incoming.parseMode ?? existing.parseMode
+        : existing.parseMode ?? incoming.parseMode,
   });
 }
 
 export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[] {
+  const useGeminiOnly = /^true|1|yes|on$/i.test(process.env.OCR_USE_GEMINI_ONLY ?? '');
+  const geminiDrafts = parseHoldingsFromGemini(result.gemini);
+  const geminiCount = geminiDrafts.length;
+  const geminiAvgConfidence =
+    geminiCount > 0
+      ? geminiDrafts.reduce((sum, draft) => sum + (draft.confidence ?? 0), 0) / geminiCount
+      : 0;
+
+  const geminiUsable =
+    geminiCount >= 2 && geminiAvgConfidence >= 0.6 && !result.geminiError;
+
+  if (useGeminiOnly) {
+    logInfo('ocr.parseMode', {
+      mode: 'gemini',
+      draftsCount: geminiCount,
+      avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+      geminiError: result.geminiError ?? null,
+    });
+    return geminiDrafts;
+  }
+
   const byTicker = new Map<string, DraftRow>();
+  const heuristicDrafts = [
+    ...parseHoldingsFromParagraphs(result),
+    ...parseHoldingsFromPlainText(result.text ?? ''),
+  ];
 
-  parseHoldingsFromGemini(result.gemini).forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
+  if (!geminiUsable) {
+    heuristicDrafts.forEach((candidate) => mergeDraftRows(byTicker, candidate));
+    const results = Array.from(byTicker.values()).map((draft) => ({
+      ...draft,
+      parseMode: draft.parseMode ?? 'heuristic',
+    }));
+    logInfo('ocr.parseMode', {
+      mode: 'heuristic',
+      draftsCount: results.length,
+      avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+      geminiCount,
+      geminiError: result.geminiError ?? null,
+    });
+    return results;
+  }
+
+  geminiDrafts.forEach((candidate) => mergeDraftRows(byTicker, candidate));
+  let hybridCount = 0;
+  heuristicDrafts.forEach((candidate) => {
+    if (!byTicker.has(candidate.ticker)) {
+      mergeDraftRows(byTicker, { ...candidate, parseMode: 'hybrid' });
+      hybridCount += 1;
+    }
   });
-
-  parseHoldingsFromParagraphs(result).forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
+  const results = Array.from(byTicker.values());
+  logInfo('ocr.parseMode', {
+    mode: hybridCount > 0 ? 'hybrid' : 'gemini',
+    draftsCount: results.length,
+    geminiCount,
+    heuristicCount: heuristicDrafts.length,
+    avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
   });
-
-  parseHoldingsFromPlainText(result.text ?? '').forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
-  });
-
-  return Array.from(byTicker.values());
+  return results;
 }

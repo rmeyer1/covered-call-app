@@ -135,6 +135,7 @@ export interface DraftHolding {
 export interface DraftRow extends DraftHolding {
   selected: boolean;
   costBasisSource?: 'ocr' | 'manual' | 'history' | 'derived';
+  parseMode?: 'gemini' | 'heuristic' | 'hybrid';
 }
 
 export interface RemoteDraft {
