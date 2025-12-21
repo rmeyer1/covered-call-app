@@ -115,7 +115,7 @@ export async function analyzeHoldingsWithGemini({
 
   try {
     const { data } = await axios.post(`${GEMINI_ENDPOINT}?key=${apiKey}`, payload);
-    const rawText: string | undefined =
+    const rawText =
       data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('') ?? '';
     const parsed = safeJsonParse(rawText) as { holdings?: GeminiHolding[]; confidence?: number } | null;
     const holdings = Array.isArray(parsed?.holdings) ? parsed?.holdings ?? [] : [];
