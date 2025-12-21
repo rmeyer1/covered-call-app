@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseHoldingsFromVision } from '../../src/lib/portfolio-ocr';
 import type { VisionAnalysisResult } from '../../src/lib/vision';
 
-test('parses single-stock detail view without over-parsing', () => {
+test('parses single-stock detail view without over-parsing', async () => {
   const vision: VisionAnalysisResult = {
     text: [
       'S',
@@ -19,7 +19,7 @@ test('parses single-stock detail view without over-parsing', () => {
     raw: {},
   };
 
-  const result = parseHoldingsFromVision(vision);
+  const result = await parseHoldingsFromVision(vision);
   assert.equal(result.length, 1);
   assert.equal(result[0]?.ticker, 'S');
   assert.equal(result[0]?.shares, 1000);

@@ -49,6 +49,20 @@ export async function getStockSnapshot(symbol: string) {
   return data?.snapshot;
 }
 
+type AlpacaAsset = {
+  symbol: string;
+  name?: string | null;
+  status?: string | null;
+  tradable?: boolean | null;
+  exchange?: string | null;
+};
+
+export async function listAssets(): Promise<AlpacaAsset[]> {
+  return get<AlpacaAsset[]>(`https://api.alpaca.markets/v2/assets`, {
+    status: 'active',
+  });
+}
+
 export async function getDailyBars(symbol: string, limit = 252) {
   const bars: AlpacaBar[] = [];
   let nextPageToken: string | null | undefined;

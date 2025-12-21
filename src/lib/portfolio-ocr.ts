@@ -1,7 +1,8 @@
 import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import type { GeminiHoldingsResult } from '@/lib/gemini';
-import { logInfo } from '@/lib/logger';
+import { logInfo, logWarn } from '@/lib/logger';
+import { resolveTickerFromName } from '@/lib/stock-lookup';
 
 const headerKeywords = new Set([
   'TICKER',
@@ -532,7 +533,7 @@ function extractFieldValue(text: string, label: string): number | null {
   return parseNumber(match?.[1] ?? null);
 }
 
-function parseSingleStockDetail(result: VisionAnalysisResult): DraftRow[] {
+async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<DraftRow[]> {
   const text = result.text ?? '';
   const lines = text
     .split(/\n+/)
@@ -541,8 +542,16 @@ function parseSingleStockDetail(result: VisionAnalysisResult): DraftRow[] {
   const firstLine = lines[0] ?? '';
   const firstToken = firstLine.split(/\s+/)[0] ?? '';
   const stripped = firstToken.replace(/[^A-Za-z]/g, '');
-  const maybeTicker = normalizeTicker(stripped, { allowSingleLetter: true });
-  if (!maybeTicker) return [];
+  const inlineTicker = normalizeTicker(stripped, { allowSingleLetter: true });
+  let ticker = inlineTicker;
+  if (!ticker && firstLine) {
+    ticker = await resolveTickerFromName(firstLine);
+    if (!ticker) {
+      logWarn('ocr.singleStock: unable to resolve ticker', { name: firstLine });
+      return [];
+    }
+  }
+  if (!ticker) return [];
 
   const shares =
     extractFieldValue(text, 'Shares') ??
@@ -555,7 +564,7 @@ function parseSingleStockDetail(result: VisionAnalysisResult): DraftRow[] {
   return [
     {
       id: createDraftId(),
-      ticker: maybeTicker,
+      ticker,
       shares,
       costBasis,
       costBasisSource: costBasis !== null ? 'ocr' : undefined,
@@ -603,7 +612,7 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
   });
 }
 
-export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[] {
+export async function parseHoldingsFromVision(result: VisionAnalysisResult): Promise<DraftRow[]> {
   const useGeminiOnly = /^true|1|yes|on$/i.test(process.env.OCR_USE_GEMINI_ONLY ?? '');
   const geminiDrafts = parseHoldingsFromGemini(result.gemini);
   const geminiCount = geminiDrafts.length;
@@ -629,7 +638,7 @@ export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[
   const viewType = detectViewType(result);
   const heuristicDrafts =
     viewType === 'single'
-      ? parseSingleStockDetail(result)
+      ? await parseSingleStockDetail(result)
       : [
           ...parseHoldingsFromParagraphs(result),
           ...parseHoldingsFromPlainText(result.text ?? ''),
