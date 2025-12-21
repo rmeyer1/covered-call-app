@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { logAxiosError, logError } from '@/lib/logger';
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || process.env.GOOGLE_GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export interface GeminiHolding {
@@ -114,7 +116,9 @@ export async function analyzeHoldingsWithGemini({
   };
 
   try {
-    const { data } = await axios.post(`${GEMINI_ENDPOINT}?key=${apiKey}`, payload);
+    const { data } = await axios.post(GEMINI_ENDPOINT, payload, {
+      headers: { 'x-goog-api-key': apiKey },
+    });
     const rawText =
       data?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('') ?? '';
     const parsed = safeJsonParse(rawText) as { holdings?: GeminiHolding[]; confidence?: number } | null;
