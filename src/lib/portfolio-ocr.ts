@@ -1,5 +1,6 @@
 import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
+import type { GeminiHoldingsResult } from '@/lib/gemini';
 
 const headerKeywords = new Set([
   'TICKER',
@@ -84,6 +85,62 @@ function tokenizeParagraph(paragraph: VisionAnalysisResult['paragraphs'][number]
     index,
     boundingBox: token.boundingBox,
   }));
+}
+
+function coerceGeminiNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') return parseNumber(value);
+  return null;
+}
+
+function normalizeOptionRight(value: unknown): DraftRow['optionRight'] {
+  if (!value || typeof value !== 'string') return null;
+  const lower = value.toLowerCase();
+  if (lower === 'call' || lower === 'put') return lower;
+  return null;
+}
+
+function mapGeminiHoldingToDraftRow(holding: GeminiHoldingsResult['holdings'][number]): DraftRow | null {
+  const ticker = normalizeTicker(holding?.ticker ?? '');
+  if (!ticker) return null;
+
+  const shares = coerceGeminiNumber(holding.shares);
+  const marketValue = coerceGeminiNumber(holding.marketValue);
+  const costBasis = coerceGeminiNumber(holding.costBasis);
+  const confidence =
+    coerceGeminiNumber(holding.confidence) ??
+    (typeof holding.confidence === 'string' ? parseNumber(holding.confidence) : null) ??
+    0.85;
+
+  const optionRight = normalizeOptionRight(holding.optionRight);
+  const optionStrike = coerceGeminiNumber(holding.optionStrike);
+  const optionExpiration = typeof holding.optionExpiration === 'string' ? holding.optionExpiration : null;
+  const assetType =
+    holding.assetType === 'option' || optionRight || optionStrike || optionExpiration ? 'option' : 'equity';
+
+  return {
+    id: createDraftId(),
+    ticker,
+    shares,
+    assetType,
+    optionStrike: optionStrike ?? null,
+    optionExpiration: optionExpiration ?? null,
+    optionRight,
+    costBasis,
+    costBasisSource: costBasis !== null ? 'ocr' : undefined,
+    marketValue,
+    confidence: Math.min(1, Math.max(0.2, confidence ?? 0.85)),
+    source: holding.sourceText ?? 'gemini',
+    selected: true,
+  } satisfies DraftRow;
+}
+
+export function parseHoldingsFromGemini(result?: GeminiHoldingsResult | null): DraftRow[] {
+  if (!result?.holdings?.length) return [];
+  return result.holdings
+    .map((holding) => mapGeminiHoldingToDraftRow(holding))
+    .filter((candidate): candidate is DraftRow => candidate !== null);
 }
 
 function isHeaderParagraph(paragraph: VisionAnalysisResult['paragraphs'][number]): boolean {
@@ -446,6 +503,10 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
 
 export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[] {
   const byTicker = new Map<string, DraftRow>();
+
+  parseHoldingsFromGemini(result.gemini).forEach((candidate) => {
+    mergeDraftRows(byTicker, candidate);
+  });
 
   parseHoldingsFromParagraphs(result).forEach((candidate) => {
     mergeDraftRows(byTicker, candidate);

@@ -228,7 +228,7 @@ export default function PortfolioPage() {
       const parsedDrafts: DraftRow[] = [];
       for (const [index, item] of prepared.entries()) {
         const uploadMeta = uploadRecords[index] ?? {};
-        const visionRes = await fetch('/api/vision/analyze', {
+        const visionRes = await fetch('/api/vision/analyze?useGemini=true', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: item.base64 }),

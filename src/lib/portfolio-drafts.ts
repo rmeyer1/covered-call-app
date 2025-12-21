@@ -5,40 +5,8 @@ import type { DraftRow, PortfolioHolding, PortfolioHoldingsResponse, RemoteDraft
 export const USER_ID_STORAGE_KEY = 'portfolio.userId';
 export const USER_HEADER_KEY = 'x-portfolio-user-id';
 
-function deriveCostBasisPerShare(
-  costBasis: number | null | undefined,
-  marketValue: number | null | undefined,
-  shares: number | null | undefined
-): number | null {
-  const hasCost = typeof costBasis === 'number' && Number.isFinite(costBasis) && costBasis > 0;
-  const hasTotals = shares && shares > 0 && marketValue !== null && marketValue !== undefined;
-  const perShareFromTotal =
-    hasTotals && shares ? (marketValue as number) / shares : null;
-
-  // If stored cost looks wildly higher than what totals imply, trust totals instead (handles K/M OCR).
-  if (hasCost && perShareFromTotal && costBasis! > perShareFromTotal * 5) {
-    return Number.isFinite(perShareFromTotal) && perShareFromTotal > 0 ? perShareFromTotal : costBasis ?? null;
-  }
-
-  if (hasCost) return costBasis as number;
-  if (perShareFromTotal && Number.isFinite(perShareFromTotal) && perShareFromTotal > 0) {
-    return perShareFromTotal;
-  }
-  return costBasis ?? null;
-}
-
-function withDerivedCostBasisDraft(draft: DraftRow): DraftRow {
-  const derived = deriveCostBasisPerShare(draft.costBasis, draft.marketValue, draft.shares);
-  if (derived === draft.costBasis) return draft;
-  return {
-    ...draft,
-    costBasis: derived,
-    costBasisSource: draft.costBasisSource ?? 'derived',
-  };
-}
-
 export function applyDerivedCostBasisToDrafts(drafts: DraftRow[]): DraftRow[] {
-  return drafts.map((draft) => withDerivedCostBasisDraft(draft));
+  return drafts;
 }
 
 export function mergeCostBasisFromHistory(
@@ -55,9 +23,8 @@ export function mergeCostBasisFromHistory(
     const existing = tickerKey ? historyMap.get(tickerKey) : undefined;
     if (!existing) return draft;
 
-    // Prefer cost derived from the draft's totals; fall back to OCR; then history.
-    const derivedFromDraftTotals = deriveCostBasisPerShare(draft.costBasis, draft.marketValue, draft.shares);
-    const costBasis = derivedFromDraftTotals ?? draft.costBasis ?? existing.costBasis ?? null;
+    // Prefer OCR cost basis; fall back to history.
+    const costBasis = draft.costBasis ?? existing.costBasis ?? null;
 
     const marketValue =
       draft.marketValue ??
@@ -78,17 +45,8 @@ export function mergeCostBasisFromHistory(
   });
 }
 
-function withDerivedCostBasisHolding(holding: PortfolioHolding): PortfolioHolding {
-  const derived = deriveCostBasisPerShare(holding.costBasis, holding.marketValue, holding.shareQty);
-  if (derived === holding.costBasis) return holding;
-  return {
-    ...holding,
-    costBasis: derived,
-  };
-}
-
 export function applyDerivedCostBasisToHoldings(holdings: PortfolioHolding[]): PortfolioHolding[] {
-  return holdings.map((holding) => withDerivedCostBasisHolding(holding));
+  return holdings;
 }
 
 export function draftGroupingKey(draft: DraftRow): string {

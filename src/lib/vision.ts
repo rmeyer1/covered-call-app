@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { logAxiosError, logError } from '@/lib/logger';
+import type { GeminiHoldingsResult } from '@/lib/gemini';
+import { analyzeHoldingsWithGemini } from '@/lib/gemini';
 
 const VISION_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
 
@@ -79,6 +81,8 @@ export interface VisionAnalysisResult {
   text: string;
   paragraphs: ParagraphInfo[];
   raw: AnnotateImageResponse;
+  gemini?: GeminiHoldingsResult;
+  geminiError?: string;
 }
 
 function getApiKey() {
@@ -158,9 +162,11 @@ function extractParagraphs(annotation?: FullTextAnnotation): ParagraphInfo[] {
 export async function analyzeImageWithVision({
   base64,
   imageUri,
+  useGemini,
 }: {
   base64?: string;
   imageUri?: string;
+  useGemini?: boolean;
 }): Promise<VisionAnalysisResult> {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -190,11 +196,24 @@ export async function analyzeImageWithVision({
     }
     const annotation = response.fullTextAnnotation;
     const paragraphs = extractParagraphs(annotation);
-    return {
+    const result: VisionAnalysisResult = {
       text: annotation?.text ?? '',
       paragraphs,
       raw: response,
     };
+    if (useGemini) {
+      try {
+        result.gemini = await analyzeHoldingsWithGemini({
+          base64,
+          ocrText: annotation?.text ?? '',
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Gemini analysis failed';
+        logError('vision.analyzeImageWithVision.gemini', message);
+        result.geminiError = message;
+      }
+    }
+    return result;
   } catch (err) {
     logAxiosError(err, 'vision.analyzeImageWithVision');
     throw err;
