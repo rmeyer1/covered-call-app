@@ -162,6 +162,7 @@ const pendingTickerValidations = new Map<string, Promise<boolean>>();
 async function validateTickerSymbol(ticker: string): Promise<boolean> {
   const symbol = ticker.toUpperCase();
   if (tickerStopwords.has(symbol)) return false;
+  const fallbackAllowed = /^[A-Z]{1,6}$/.test(symbol) && !tickerStopwords.has(symbol);
   const cached = tickerValidationCache.get(symbol);
   if (typeof cached === 'boolean') return cached;
   const pending = pendingTickerValidations.get(symbol);
@@ -171,8 +172,8 @@ async function validateTickerSymbol(ticker: string): Promise<boolean> {
     try {
       const res = await fetch(`/api/stocks/search?q=${encodeURIComponent(symbol)}`);
       if (!res.ok) {
-        tickerValidationCache.set(symbol, false);
-        return false;
+        tickerValidationCache.set(symbol, fallbackAllowed);
+        return fallbackAllowed;
       }
       const data = (await res.json().catch(() => null)) as { results?: Array<{ symbol?: string; tradable?: boolean }> } | null;
       const found =
@@ -181,8 +182,8 @@ async function validateTickerSymbol(ticker: string): Promise<boolean> {
       tickerValidationCache.set(symbol, found);
       return found;
     } catch {
-      tickerValidationCache.set(symbol, false);
-      return false;
+      tickerValidationCache.set(symbol, fallbackAllowed);
+      return fallbackAllowed;
     } finally {
       pendingTickerValidations.delete(symbol);
     }
@@ -583,8 +584,6 @@ function findAnchoredNumericCandidate(
       const rect = normalizeBoundingBox(candidate.boundingBox);
       if (!rect) return null;
       const distanceToTicker = Math.hypot(rect.centerX - tickerRect.centerX, (rect.centerY - tickerRect.centerY) * 1.1);
-      const hasMonetaryHint = hasCurrencySymbol(candidate.raw) || candidate.raw.includes('.');
-      if (!hasMonetaryHint) return null;
       const proximityLimit = Math.max(tickerRect.height * 3, tolerance * 3);
       if (distanceToTicker > proximityLimit) return null;
       const alignment =
@@ -594,7 +593,7 @@ function findAnchoredNumericCandidate(
       if (targets.length > 0 && alignment < 0.2) return null;
       const score =
         (hasCurrencySymbol(candidate.raw) ? 3 : 0) +
-        (candidate.raw.includes('.') ? 1.5 : 0) +
+        (candidate.raw.includes('.') ? 1.5 : 0.4) +
         alignment * 2 -
         distanceToTicker * 0.05;
       return { candidate, score, alignment };
@@ -780,7 +779,6 @@ async function buildDraftRowFromLayoutRow(
     columnCenters,
     columnTolerance
   );
-  if (!anchoredNumeric) return null;
 
   const layoutBoost = viewType === 'detail' && companyName ? 0.05 : 0;
   const sharesCandidate =
@@ -796,6 +794,9 @@ async function buildDraftRowFromLayoutRow(
     pickNumericByColumn(numericCandidates, columnHints.market, columnCenters, columnTolerance) ??
     findValueNearLabel(row.tokens, numericCandidates, /market\s*value|position/i) ??
     pickNextNumeric(numericCandidates, costCandidate?.index ?? sharesCandidate?.index ?? tickerToken?.index ?? 0, true);
+
+  const fallbackNumeric = anchoredNumeric?.candidate ?? marketCandidate ?? costCandidate ?? numericCandidates[0];
+  if (!fallbackNumeric && sharesValue === null && !optionMatch) return null;
 
   const costAlignment = columnAlignmentScore(
     normalizeBoundingBox(costCandidate?.boundingBox),
@@ -898,7 +899,6 @@ async function buildDraftRowFromParagraph(
   const anchoredNumeric =
     tickerToken &&
     numericCandidates.find((candidate) => {
-      if (!hasCurrencySymbol(candidate.raw) && !candidate.raw.includes('.')) return false;
       const rect = normalizeBoundingBox(candidate.boundingBox);
       if (rect && tickerRect) {
         const distance = Math.hypot(rect.centerX - tickerRect.centerX, (rect.centerY - tickerRect.centerY) * 1.1);
@@ -906,7 +906,6 @@ async function buildDraftRowFromParagraph(
       }
       return Math.abs(candidate.index - tickerToken.index) <= 3;
     });
-  if (!anchoredNumeric && !optionMatch) return null;
 
   const sharesCandidate = tickerToken
     ? pickSharesCandidate(numericCandidates, tickerToken.index)
