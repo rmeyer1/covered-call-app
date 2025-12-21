@@ -533,6 +533,29 @@ function extractFieldValue(text: string, label: string): number | null {
   return parseNumber(match?.[1] ?? null);
 }
 
+function extractFieldFromLines(lines: string[], label: string): number | null {
+  const inlinePattern = new RegExp(`^${label}\\s*\\$?\\s*([\\d,]+(?:\\.\\d+)?)$`, 'i');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    const inline = line.match(inlinePattern);
+    if (inline) {
+      const parsed = parseNumber(inline[1]);
+      if (parsed !== null) return parsed;
+    }
+    if (line.trim().toLowerCase() === label.toLowerCase()) {
+      for (let offset = 1; offset <= 2; offset += 1) {
+        const candidate = lines[index + offset];
+        if (!candidate) continue;
+        const numeric = candidate.match(/[\d,]+(?:\.\d+)?/);
+        const parsed = parseNumber(numeric?.[0] ?? null);
+        if (parsed !== null) return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 async function resolveTickerForName(name: string): Promise<string | null> {
   if (typeof window === 'undefined') {
     return resolveTickerFromName(name);
@@ -568,6 +591,10 @@ async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<Dra
   if (!ticker) return [];
 
   const shares =
+    extractFieldFromLines(lines, 'Shares') ??
+    extractFieldFromLines(lines, 'Share') ??
+    extractFieldFromLines(lines, 'Qty') ??
+    extractFieldFromLines(lines, 'Quantity') ??
     extractFieldValue(text, 'Shares') ??
     extractFieldValue(text, 'Share') ??
     extractFieldValue(text, 'Qty') ??

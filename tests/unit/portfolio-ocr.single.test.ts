@@ -26,3 +26,26 @@ test('parses single-stock detail view without over-parsing', async () => {
   assert.equal(result[0]?.costBasis, 1.11);
   assert.equal(result[0]?.marketValue, 870);
 });
+
+test('parses shares when value is on the next line', async () => {
+  const vision: VisionAnalysisResult = {
+    text: [
+      'Alphabet Class A',
+      '$308.79',
+      'Shares',
+      '15',
+      'Your market value',
+      '$4,713.64',
+      'Your average cost',
+      '$171.17',
+    ].join('\n'),
+    paragraphs: [],
+    raw: {},
+  };
+
+  const result = await parseHoldingsFromVision(vision);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.shares, 15);
+  assert.equal(result[0]?.marketValue, 4713.64);
+  assert.equal(result[0]?.costBasis, 171.17);
+});
