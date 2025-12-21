@@ -22,6 +22,33 @@ const headerKeywords = new Set([
   'CHANGE',
 ]);
 
+const tickerBlacklist = new Set([
+  'TOTAL',
+  'VALUE',
+  'PRICE',
+  'CASH',
+  'EQUITY',
+  'SHARES',
+  'SHARE',
+  'YTD',
+  'TODAY',
+  'RETURN',
+  'ADVANCED',
+  'PORTFOLIO',
+  'DIVERSITY',
+  'DIVERSIFICATION',
+  'INDIVIDUAL',
+  'INVESTING',
+  'MARKET',
+  'AVERAGE',
+  'COST',
+  'BASIS',
+  'GAIN',
+  'LOSS',
+  'AFTER',
+  'HOURS',
+]);
+
 const optionPattern =
   /(?:^|\s)(\d{1,3})?\s*([A-Z]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\s+(\d{1,2}\/\d{1,2})/i;
 
@@ -54,11 +81,16 @@ export function parseNumber(value: string | undefined | null): number | null {
   return parsed * multiplier;
 }
 
-function normalizeTicker(text: string): string | null {
+function normalizeTicker(
+  text: string,
+  options?: {
+    allowSingleLetter?: boolean;
+  }
+): string | null {
   const upper = text.toUpperCase();
   if (!/^[A-Z]{1,6}$/.test(upper)) return null;
-  const blacklist = new Set(['TOTAL', 'VALUE', 'PRICE', 'CASH', 'EQUITY']);
-  if (blacklist.has(upper)) return null;
+  if (!options?.allowSingleLetter && upper.length < 2) return null;
+  if (tickerBlacklist.has(upper)) return null;
   return upper;
 }
 
@@ -74,6 +106,25 @@ function parseOptionContract(text: string): OptionMatch | null {
   const expiration = expirationRaw?.trim() ?? '';
   if (!expiration) return null;
   return { ticker, strike, right, expiration, quantity };
+}
+
+type ViewType = 'table' | 'single' | 'unknown';
+
+function detectViewType(result: VisionAnalysisResult): ViewType {
+  const text = (result.text ?? '').toUpperCase();
+  const hasTableHeaders =
+    ['TICKER', 'SYMBOL', 'SHARES', 'MARKET VALUE', 'COST BASIS', 'AVG COST'].filter((key) =>
+      text.includes(key)
+    ).length >= 2;
+  const singleSignals =
+    text.includes('YOUR AVERAGE COST') ||
+    text.includes('AVERAGE COST') ||
+    text.includes('YOUR MARKET VALUE') ||
+    text.includes('PORTFOLIO DIVERSITY');
+
+  if (hasTableHeaders && !singleSignals) return 'table';
+  if (singleSignals) return 'single';
+  return 'unknown';
 }
 
 function tokenizeParagraph(paragraph: VisionAnalysisResult['paragraphs'][number]): OcrTokenCandidate[] {
@@ -475,6 +526,48 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
   return results;
 }
 
+function extractFieldValue(text: string, label: string): number | null {
+  const pattern = new RegExp(`${label}\\s*\\$?\\s*([\\d,]+(?:\\.\\d+)?)`, 'i');
+  const match = text.match(pattern);
+  return parseNumber(match?.[1] ?? null);
+}
+
+function parseSingleStockDetail(result: VisionAnalysisResult): DraftRow[] {
+  const text = result.text ?? '';
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstLine = lines[0] ?? '';
+  const firstToken = firstLine.split(/\s+/)[0] ?? '';
+  const stripped = firstToken.replace(/[^A-Za-z]/g, '');
+  const maybeTicker = normalizeTicker(stripped, { allowSingleLetter: true });
+  if (!maybeTicker) return [];
+
+  const shares =
+    extractFieldValue(text, 'Shares') ??
+    extractFieldValue(text, 'Share') ??
+    extractFieldValue(text, 'Qty') ??
+    null;
+  const costBasis = extractFieldValue(text, 'Your average cost') ?? extractFieldValue(text, 'Average cost') ?? null;
+  const marketValue = extractFieldValue(text, 'Your market value') ?? extractFieldValue(text, 'Market value') ?? null;
+
+  return [
+    {
+      id: createDraftId(),
+      ticker: maybeTicker,
+      shares,
+      costBasis,
+      costBasisSource: costBasis !== null ? 'ocr' : undefined,
+      marketValue,
+      confidence: 0.7,
+      source: text.slice(0, 240),
+      parseMode: 'heuristic',
+      selected: true,
+    },
+  ];
+}
+
 function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
   const existing = map.get(incoming.ticker);
   if (!existing) {
@@ -533,10 +626,14 @@ export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[
   }
 
   const byTicker = new Map<string, DraftRow>();
-  const heuristicDrafts = [
-    ...parseHoldingsFromParagraphs(result),
-    ...parseHoldingsFromPlainText(result.text ?? ''),
-  ];
+  const viewType = detectViewType(result);
+  const heuristicDrafts =
+    viewType === 'single'
+      ? parseSingleStockDetail(result)
+      : [
+          ...parseHoldingsFromParagraphs(result),
+          ...parseHoldingsFromPlainText(result.text ?? ''),
+        ];
 
   if (!geminiUsable) {
     heuristicDrafts.forEach((candidate) => mergeDraftRows(byTicker, candidate));
@@ -550,6 +647,7 @@ export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[
       avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
       geminiCount,
       geminiError: result.geminiError ?? null,
+      viewType,
     });
     return results;
   }
@@ -569,6 +667,7 @@ export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[
     geminiCount,
     heuristicCount: heuristicDrafts.length,
     avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+    viewType,
   });
   return results;
 }
