@@ -13,6 +13,10 @@ import type { OptionContract } from '@/lib/options';
 
 const ALPACA_DATA_BASE_V1BETA1 = 'https://data.alpaca.markets/v1beta1';
 const ALPACA_DATA_BASE_V2 = 'https://data.alpaca.markets/v2';
+const ALPACA_TRADING_BASE =
+  process.env.ALPACA_TRADING_API_URL ??
+  process.env.ALPACA_API_BASE_URL ??
+  'https://api.alpaca.markets';
 
 export function getAlpacaAuth() {
   const keyId = process.env.ALPACA_API_KEY_ID;
@@ -47,6 +51,20 @@ export async function getStockSnapshot(symbol: string) {
     `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/snapshot`
   );
   return data?.snapshot;
+}
+
+type AlpacaAsset = {
+  symbol: string;
+  name?: string | null;
+  status?: string | null;
+  tradable?: boolean | null;
+  exchange?: string | null;
+};
+
+export async function listAssets(): Promise<AlpacaAsset[]> {
+  return get<AlpacaAsset[]>(`${ALPACA_TRADING_BASE}/v2/assets`, {
+    status: 'active',
+  });
 }
 
 export async function getDailyBars(symbol: string, limit = 252) {

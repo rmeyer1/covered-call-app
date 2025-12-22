@@ -1,6 +1,8 @@
 import type { DraftRow, OcrNumericCandidate, OcrTokenCandidate } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import type { GeminiHoldingsResult } from '@/lib/gemini';
+import { logInfo, logWarn } from '@/lib/logger';
+import { resolveTickerFromName } from '@/lib/stock-lookup';
 
 const headerKeywords = new Set([
   'TICKER',
@@ -19,6 +21,33 @@ const headerKeywords = new Set([
   'VALUE',
   'TOTAL',
   'CHANGE',
+]);
+
+const tickerBlacklist = new Set([
+  'TOTAL',
+  'VALUE',
+  'PRICE',
+  'CASH',
+  'EQUITY',
+  'SHARES',
+  'SHARE',
+  'YTD',
+  'TODAY',
+  'RETURN',
+  'ADVANCED',
+  'PORTFOLIO',
+  'DIVERSITY',
+  'DIVERSIFICATION',
+  'INDIVIDUAL',
+  'INVESTING',
+  'MARKET',
+  'AVERAGE',
+  'COST',
+  'BASIS',
+  'GAIN',
+  'LOSS',
+  'AFTER',
+  'HOURS',
 ]);
 
 const optionPattern =
@@ -53,11 +82,16 @@ export function parseNumber(value: string | undefined | null): number | null {
   return parsed * multiplier;
 }
 
-function normalizeTicker(text: string): string | null {
+function normalizeTicker(
+  text: string,
+  options?: {
+    allowSingleLetter?: boolean;
+  }
+): string | null {
   const upper = text.toUpperCase();
   if (!/^[A-Z]{1,6}$/.test(upper)) return null;
-  const blacklist = new Set(['TOTAL', 'VALUE', 'PRICE', 'CASH', 'EQUITY']);
-  if (blacklist.has(upper)) return null;
+  if (!options?.allowSingleLetter && upper.length < 2) return null;
+  if (tickerBlacklist.has(upper)) return null;
   return upper;
 }
 
@@ -73,6 +107,25 @@ function parseOptionContract(text: string): OptionMatch | null {
   const expiration = expirationRaw?.trim() ?? '';
   if (!expiration) return null;
   return { ticker, strike, right, expiration, quantity };
+}
+
+type ViewType = 'table' | 'single' | 'unknown';
+
+function detectViewType(result: VisionAnalysisResult): ViewType {
+  const text = (result.text ?? '').toUpperCase();
+  const hasTableHeaders =
+    ['TICKER', 'SYMBOL', 'SHARES', 'MARKET VALUE', 'COST BASIS', 'AVG COST'].filter((key) =>
+      text.includes(key)
+    ).length >= 2;
+  const singleSignals =
+    text.includes('YOUR AVERAGE COST') ||
+    text.includes('AVERAGE COST') ||
+    text.includes('YOUR MARKET VALUE') ||
+    text.includes('PORTFOLIO DIVERSITY');
+
+  if (hasTableHeaders && !singleSignals) return 'table';
+  if (singleSignals) return 'single';
+  return 'unknown';
 }
 
 function tokenizeParagraph(paragraph: VisionAnalysisResult['paragraphs'][number]): OcrTokenCandidate[] {
@@ -132,6 +185,7 @@ function mapGeminiHoldingToDraftRow(holding: GeminiHoldingsResult['holdings'][nu
     marketValue,
     confidence: Math.min(1, Math.max(0.2, confidence ?? 0.85)),
     source: holding.sourceText ?? 'gemini',
+    parseMode: 'gemini',
     selected: true,
   } satisfies DraftRow;
 }
@@ -324,6 +378,7 @@ function buildDraftRowFromParagraph(
     marketValue: resolvedMarketValue,
     confidence,
     source: paragraph.text,
+    parseMode: 'heuristic',
     selected: true,
   } satisfies DraftRow;
 }
@@ -415,21 +470,22 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       const currencyValue = extractCurrencyValue(contextLines);
       const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
 
-      results.push({
-        id: createDraftId(),
-        ticker: option.ticker,
-        shares,
-        assetType: 'option',
+    results.push({
+      id: createDraftId(),
+      ticker: option.ticker,
+      shares,
+      assetType: 'option',
         optionStrike: option.strike,
         optionExpiration: option.expiration,
         optionRight: option.right,
         costBasis: currencyValue ?? null,
-        costBasisSource: currencyValue ? 'ocr' : undefined,
-        marketValue: currencyValue ?? null,
-        confidence: Math.min(1, confidenceBase),
-        source,
-        selected: true,
-      });
+      costBasisSource: currencyValue ? 'ocr' : undefined,
+      marketValue: currencyValue ?? null,
+      confidence: Math.min(1, confidenceBase),
+      source,
+      parseMode: 'heuristic',
+      selected: true,
+    });
 
       index = sliceEnd;
       continue;
@@ -461,6 +517,7 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       marketValue: currencyValue ?? secondaryValue ?? null,
       confidence: Math.min(1, confidenceBase),
       source,
+      parseMode: 'heuristic',
       selected: true,
     });
 
@@ -468,6 +525,120 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
   }
 
   return results;
+}
+
+function extractFieldValue(text: string, label: string): number | null {
+  const pattern = new RegExp(`${label}\\s*\\$?\\s*([\\d,]+(?:\\.\\d+)?)`, 'i');
+  const match = text.match(pattern);
+  return parseNumber(match?.[1] ?? null);
+}
+
+function extractFieldFromLines(
+  lines: string[],
+  label: string,
+  options?: { targetValue?: number | null }
+): number | null {
+  const inlinePattern = new RegExp(`^${label}\\s*\\$?\\s*([\\d,]+(?:\\.\\d+)?)$`, 'i');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    const inline = line.match(inlinePattern);
+    if (inline) {
+      const parsed = parseNumber(inline[1]);
+      if (parsed !== null) return parsed;
+    }
+    if (line.trim().toLowerCase() === label.toLowerCase()) {
+      const candidates: Array<{ value: number; distance: number }> = [];
+      for (let offset = 1; offset <= 8; offset += 1) {
+        const candidate = lines[index + offset];
+        if (!candidate) continue;
+        const numeric = candidate.match(/[\d,]+(?:\.\d+)?/);
+        const parsed = parseNumber(numeric?.[0] ?? null);
+        if (parsed !== null) {
+          candidates.push({ value: parsed, distance: offset });
+        }
+      }
+      if (candidates.length) {
+        const positive = candidates.filter((candidate) => candidate.value > 0);
+        const targetValue = options?.targetValue;
+        if (targetValue && Number.isFinite(targetValue)) {
+          const best = positive
+            .map((candidate) => ({
+              ...candidate,
+              delta: Math.abs(candidate.value - targetValue),
+            }))
+            .sort((a, b) => a.delta - b.delta || a.distance - b.distance)[0];
+          return best?.value ?? null;
+        }
+        const nearest = positive.sort((a, b) => a.distance - b.distance)[0];
+        return nearest?.value ?? null;
+      }
+    }
+  }
+  return null;
+}
+
+async function resolveTickerForName(name: string): Promise<string | null> {
+  if (typeof window === 'undefined') {
+    return resolveTickerFromName(name);
+  }
+  try {
+    const res = await fetch(`/api/stocks/resolve?name=${encodeURIComponent(name)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { symbol?: string | null };
+    return data?.symbol ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<DraftRow[]> {
+  const text = result.text ?? '';
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstLine = lines[0] ?? '';
+  const firstToken = firstLine.split(/\s+/)[0] ?? '';
+  const stripped = firstToken.replace(/[^A-Za-z]/g, '');
+  const inlineTicker = normalizeTicker(stripped, { allowSingleLetter: true });
+  let ticker = inlineTicker;
+  if (!ticker && firstLine) {
+    ticker = await resolveTickerForName(firstLine);
+    if (!ticker) {
+      logWarn('ocr.singleStock: unable to resolve ticker', { name: firstLine });
+      return [];
+    }
+  }
+  if (!ticker) return [];
+
+  const costBasis = extractFieldValue(text, 'Your average cost') ?? extractFieldValue(text, 'Average cost') ?? null;
+  const marketValue = extractFieldValue(text, 'Your market value') ?? extractFieldValue(text, 'Market value') ?? null;
+  const shareTarget = marketValue && costBasis ? marketValue / costBasis : null;
+  const shares =
+    extractFieldFromLines(lines, 'Shares', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Share', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Qty', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Quantity', { targetValue: shareTarget }) ??
+    extractFieldValue(text, 'Shares') ??
+    extractFieldValue(text, 'Share') ??
+    extractFieldValue(text, 'Qty') ??
+    null;
+
+  return [
+    {
+      id: createDraftId(),
+      ticker,
+      shares,
+      costBasis,
+      costBasisSource: costBasis !== null ? 'ocr' : undefined,
+      marketValue,
+      confidence: 0.7,
+      source: text.slice(0, 240),
+      parseMode: 'heuristic',
+      selected: true,
+    },
+  ];
 }
 
 function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
@@ -498,23 +669,78 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
     marketValue: chooseValue(existing.marketValue, incoming.marketValue),
     confidence: Math.max(existingConfidence, incomingConfidence),
     source: incomingConfidence > existingConfidence && incoming.source ? incoming.source : existing.source,
+    parseMode:
+      incomingConfidence > existingConfidence + 0.05
+        ? incoming.parseMode ?? existing.parseMode
+        : existing.parseMode ?? incoming.parseMode,
   });
 }
 
-export function parseHoldingsFromVision(result: VisionAnalysisResult): DraftRow[] {
+export async function parseHoldingsFromVision(result: VisionAnalysisResult): Promise<DraftRow[]> {
+  const useGeminiOnly = /^true|1|yes|on$/i.test(process.env.OCR_USE_GEMINI_ONLY ?? '');
+  const geminiDrafts = parseHoldingsFromGemini(result.gemini);
+  const geminiCount = geminiDrafts.length;
+  const geminiAvgConfidence =
+    geminiCount > 0
+      ? geminiDrafts.reduce((sum, draft) => sum + (draft.confidence ?? 0), 0) / geminiCount
+      : 0;
+
+  const geminiUsable =
+    geminiCount >= 2 && geminiAvgConfidence >= 0.6 && !result.geminiError;
+
+  if (useGeminiOnly) {
+    logInfo('ocr.parseMode', {
+      mode: 'gemini',
+      draftsCount: geminiCount,
+      avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+      geminiError: result.geminiError ?? null,
+    });
+    return geminiDrafts;
+  }
+
   const byTicker = new Map<string, DraftRow>();
+  const viewType = detectViewType(result);
+  const heuristicDrafts =
+    viewType === 'single'
+      ? await parseSingleStockDetail(result)
+      : [
+          ...parseHoldingsFromParagraphs(result),
+          ...parseHoldingsFromPlainText(result.text ?? ''),
+        ];
 
-  parseHoldingsFromGemini(result.gemini).forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
+  if (!geminiUsable) {
+    heuristicDrafts.forEach((candidate) => mergeDraftRows(byTicker, candidate));
+    const results = Array.from(byTicker.values()).map((draft) => ({
+      ...draft,
+      parseMode: draft.parseMode ?? 'heuristic',
+    }));
+    logInfo('ocr.parseMode', {
+      mode: 'heuristic',
+      draftsCount: results.length,
+      avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+      geminiCount,
+      geminiError: result.geminiError ?? null,
+      viewType,
+    });
+    return results;
+  }
+
+  geminiDrafts.forEach((candidate) => mergeDraftRows(byTicker, candidate));
+  let hybridCount = 0;
+  heuristicDrafts.forEach((candidate) => {
+    if (!byTicker.has(candidate.ticker)) {
+      mergeDraftRows(byTicker, { ...candidate, parseMode: 'hybrid' });
+      hybridCount += 1;
+    }
   });
-
-  parseHoldingsFromParagraphs(result).forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
+  const results = Array.from(byTicker.values());
+  logInfo('ocr.parseMode', {
+    mode: hybridCount > 0 ? 'hybrid' : 'gemini',
+    draftsCount: results.length,
+    geminiCount,
+    heuristicCount: heuristicDrafts.length,
+    avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
+    viewType,
   });
-
-  parseHoldingsFromPlainText(result.text ?? '').forEach((candidate) => {
-    mergeDraftRows(byTicker, candidate);
-  });
-
-  return Array.from(byTicker.values());
+  return results;
 }

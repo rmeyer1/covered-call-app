@@ -124,6 +124,7 @@ export function mergeDraftRows(
       marketValue,
       confidence,
       source: previous?.source ?? group[0]?.source,
+      parseMode: previous?.parseMode ?? group[0]?.parseMode,
       selected: previous?.selected ?? selected,
       uploadId: null,
       uploadName: uploadNames.length > 1 ? `Multiple (${uploadNames.length})` : uploadNames[0] ?? null,

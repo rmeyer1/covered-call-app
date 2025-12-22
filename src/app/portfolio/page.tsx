@@ -239,7 +239,7 @@ export default function PortfolioPage() {
         }
         const data = (await visionRes.json()) as VisionAnalysisResult;
         setRawTexts((prev) => [...prev, data.text ?? '']);
-        const parsed = hydrateDrafts(parseHoldingsFromVision(data)).map((draft) => ({
+        const parsed = hydrateDrafts(await parseHoldingsFromVision(data)).map((draft) => ({
           ...draft,
           uploadId: uploadMeta?.id ?? uploadMeta?.path ?? null,
           uploadName: uploadMeta?.filename ?? item.file.name,

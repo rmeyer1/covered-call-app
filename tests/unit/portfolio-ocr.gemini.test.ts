@@ -4,7 +4,7 @@ import { parseHoldingsFromVision } from '../../src/lib/portfolio-ocr';
 import type { VisionAnalysisResult } from '../../src/lib/vision';
 import type { GeminiHoldingsResult } from '../../src/lib/gemini';
 
-test('parseHoldingsFromVision uses Gemini holdings when present', () => {
+test('parseHoldingsFromVision uses Gemini holdings when present', async () => {
   const gemini: GeminiHoldingsResult = {
     model: 'gemini-1.5-flash',
     holdings: [
@@ -25,7 +25,7 @@ test('parseHoldingsFromVision uses Gemini holdings when present', () => {
     gemini,
   };
 
-  const result = parseHoldingsFromVision(vision);
+  const result = await parseHoldingsFromVision(vision);
   assert.equal(result.length, 1);
   assert.equal(result[0]?.ticker, 'AAPL');
   assert.equal(result[0]?.shares, 12);
@@ -35,7 +35,7 @@ test('parseHoldingsFromVision uses Gemini holdings when present', () => {
   assert.ok((result[0]?.confidence ?? 0) >= 0.9);
 });
 
-test('parseHoldingsFromVision maps Gemini option fields', () => {
+test('parseHoldingsFromVision maps Gemini option fields', async () => {
   const gemini: GeminiHoldingsResult = {
     model: 'gemini-1.5-flash',
     holdings: [
@@ -58,7 +58,7 @@ test('parseHoldingsFromVision maps Gemini option fields', () => {
     gemini,
   };
 
-  const result = parseHoldingsFromVision(vision);
+  const result = await parseHoldingsFromVision(vision);
   assert.equal(result.length, 1);
   assert.equal(result[0]?.assetType, 'option');
   assert.equal(result[0]?.optionRight, 'call');
