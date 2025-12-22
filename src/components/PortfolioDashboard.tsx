@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { RefreshCw, Upload, TrendingUp } from 'lucide-react';
 import type { PortfolioHolding, PortfolioHoldingsResponse } from '@/types';
+import { resolveBrokerLabel } from '@/lib/brokerage';
 import StockDetailsDialog from '@/components/StockDetailsDialog';
 import { calculateStatsFromHoldings } from '@/lib/portfolio-drafts';
 
@@ -38,6 +39,19 @@ function formatNumber(value?: number | null) {
 function formatPercent(value?: number | null) {
   if (value === null || value === undefined) return '—';
   return `${Math.round(value * 100)}%`;
+}
+
+function renderBrokerBadge(value?: string | null) {
+  const label = resolveBrokerLabel(value);
+  const tone =
+    label === 'Unknown'
+      ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+      : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200';
+  return (
+    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${tone}`}>
+      {label}
+    </span>
+  );
 }
 
 export default function PortfolioDashboard({
@@ -180,7 +194,7 @@ export default function PortfolioDashboard({
                         </div>
                       </td>
                       <td className="p-3">{formatPercent(holding.confidence)}</td>
-                      <td className="p-3 text-xs text-gray-500 dark:text-gray-400">{holding.source ?? '—'}</td>
+                      <td className="p-3">{renderBrokerBadge(holding.source)}</td>
                     </tr>
                   ))}
                 </tbody>

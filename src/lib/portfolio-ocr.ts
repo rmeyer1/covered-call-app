@@ -3,6 +3,7 @@ import type { VisionAnalysisResult } from '@/lib/vision';
 import type { GeminiHoldingsResult } from '@/lib/gemini';
 import { logInfo, logWarn } from '@/lib/logger';
 import { resolveTickerFromName } from '@/lib/stock-lookup';
+import { detectBrokerage } from '@/lib/brokerage';
 
 const headerKeywords = new Set([
   'TICKER',
@@ -688,6 +689,8 @@ export async function parseHoldingsFromVision(result: VisionAnalysisResult): Pro
   const geminiUsable =
     geminiCount >= 2 && geminiAvgConfidence >= 0.6 && !result.geminiError;
 
+  const detectedBroker = detectBrokerage(result.text ?? '');
+
   if (useGeminiOnly) {
     logInfo('ocr.parseMode', {
       mode: 'gemini',
@@ -695,7 +698,10 @@ export async function parseHoldingsFromVision(result: VisionAnalysisResult): Pro
       avgConfidence: Number(geminiAvgConfidence.toFixed(2)),
       geminiError: result.geminiError ?? null,
     });
-    return geminiDrafts;
+    return geminiDrafts.map((draft) => ({
+      ...draft,
+      broker: draft.broker ?? detectedBroker?.value ?? null,
+    }));
   }
 
   const byTicker = new Map<string, DraftRow>();
@@ -713,6 +719,7 @@ export async function parseHoldingsFromVision(result: VisionAnalysisResult): Pro
     const results = Array.from(byTicker.values()).map((draft) => ({
       ...draft,
       parseMode: draft.parseMode ?? 'heuristic',
+      broker: draft.broker ?? detectedBroker?.value ?? null,
     }));
     logInfo('ocr.parseMode', {
       mode: 'heuristic',
@@ -733,7 +740,10 @@ export async function parseHoldingsFromVision(result: VisionAnalysisResult): Pro
       hybridCount += 1;
     }
   });
-  const results = Array.from(byTicker.values());
+  const results = Array.from(byTicker.values()).map((draft) => ({
+    ...draft,
+    broker: draft.broker ?? detectedBroker?.value ?? null,
+  }));
   logInfo('ocr.parseMode', {
     mode: hybridCount > 0 ? 'hybrid' : 'gemini',
     draftsCount: results.length,

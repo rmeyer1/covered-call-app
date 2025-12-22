@@ -6,6 +6,7 @@ import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2, Shuffle } from 'luc
 import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
+import { BROKERAGE_OPTIONS, detectBrokerage, resolveBrokerLabel } from '@/lib/brokerage';
 import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
@@ -403,6 +404,19 @@ export default function PortfolioPage() {
     );
   };
 
+  const renderBrokerBadge = (value?: string | null) => {
+    const label = resolveBrokerLabel(value);
+    const tone =
+      label === 'Unknown'
+        ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+        : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200';
+    return (
+      <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${tone}`}>
+        {label}
+      </span>
+    );
+  };
+
   const handleFeedback = (ok: boolean) => {
     setFeedbackMessage(ok ? 'Thanks! We will keep refining the OCR.' : 'Thanks! We will use this to improve parsing.');
     console.info('ocr.feedback', {
@@ -455,6 +469,7 @@ export default function PortfolioPage() {
       const payload = readyDrafts.map((draft) => {
         const existing = historyByTicker.get(draft.ticker.toUpperCase());
         const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
+        const brokerValue = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
         return {
           id: existing?.id ?? (isUuid(draft.id) ? draft.id : undefined),
           ticker: draft.ticker,
@@ -470,7 +485,7 @@ export default function PortfolioPage() {
             existing?.marketValue ??
             null,
           confidence: draft.confidence ?? existing?.confidence ?? null,
-          source: draft.source ?? existing?.source ?? null,
+          source: brokerValue ?? existing?.source ?? null,
           draftId: isUuid(draft.id) ? draft.id : null,
           uploadId: draft.uploadId ?? existing?.uploadId ?? null,
         };
@@ -714,6 +729,7 @@ export default function PortfolioPage() {
                       const lastKnownCost = historyHolding?.costBasis ?? undefined;
                       const costBasisPlaceholder =
                         draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
+                      const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
 
                       return (
                         <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
@@ -795,9 +811,40 @@ export default function PortfolioPage() {
                             />
                           </td>
                           <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
-                          <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
-                            {draft.uploadName ? `${draft.uploadName}${draft.source ? ' — ' : ''}` : ''}
-                            {draft.source}
+                          <td className="p-3">
+                            <div className="flex flex-col gap-2">
+                              {renderBrokerBadge(detectedBroker)}
+                              <select
+                                value={detectedBroker ?? ''}
+                                onChange={(e) => {
+                                  const next = e.target.value || null;
+                                  if (mergeAccounts) {
+                                    const groupKey = findGroupKeyForDraft(draft.id);
+                                    if (!groupKey) return;
+                                    applyDraftUpdate((list) =>
+                                      list.map((item) =>
+                                        draftGroupingKey(item) === groupKey ? { ...item, broker: next } : item
+                                      )
+                                    );
+                                  } else {
+                                    applyDraftUpdate((list) =>
+                                      list.map((item) => (item.id === draft.id ? { ...item, broker: next } : item))
+                                    );
+                                  }
+                                }}
+                                className="w-40 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+                              >
+                                <option value="">Unknown</option>
+                                {BROKERAGE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {draft.uploadName && (
+                                <span className="text-[11px] text-gray-400">{draft.uploadName}</span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
                             <button
