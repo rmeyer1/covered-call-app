@@ -450,11 +450,13 @@ export default function PortfolioPage() {
       const historyByTicker = new Map(
         holdings.map((holding) => [holding.ticker?.toUpperCase?.() ?? '', holding])
       );
+      const isUuid = (value?: string | null) =>
+        Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
       const payload = readyDrafts.map((draft) => {
         const existing = historyByTicker.get(draft.ticker.toUpperCase());
         const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
         return {
-          id: existing?.id ?? draft.id,
+          id: existing?.id ?? (isUuid(draft.id) ? draft.id : undefined),
           ticker: draft.ticker,
           shareQty: draft.shares,
           assetType: draft.assetType ?? existing?.type ?? 'equity',
@@ -469,7 +471,7 @@ export default function PortfolioPage() {
             null,
           confidence: draft.confidence ?? existing?.confidence ?? null,
           source: draft.source ?? existing?.source ?? null,
-          draftId: draft.id,
+          draftId: isUuid(draft.id) ? draft.id : null,
           uploadId: draft.uploadId ?? existing?.uploadId ?? null,
         };
       });
