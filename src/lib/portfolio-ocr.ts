@@ -612,8 +612,6 @@ async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<Dra
   }
   if (!ticker) return [];
 
-  const shareTarget =
-    marketValue && costBasis ? marketValue / costBasis : null;
   const costBasis = extractFieldValue(text, 'Your average cost') ?? extractFieldValue(text, 'Average cost') ?? null;
   const marketValue = extractFieldValue(text, 'Your market value') ?? extractFieldValue(text, 'Market value') ?? null;
   const shareTarget = marketValue && costBasis ? marketValue / costBasis : null;
