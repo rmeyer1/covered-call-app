@@ -49,3 +49,27 @@ test('parses shares when value is on the next line', async () => {
   assert.equal(result[0]?.marketValue, 4713.64);
   assert.equal(result[0]?.costBasis, 171.17);
 });
+
+test('chooses share candidate closest to derived value', async () => {
+  const vision: VisionAnalysisResult = {
+    text: [
+      'Invesco Exchange-Traded Fund',
+      'Trust II Invesco NASDAQ 100 ETF',
+      '$252.94',
+      'Your market value',
+      '$7,929.71',
+      'Your average cost',
+      '$208.36',
+      'Shares',
+      '+$1,382.09 (+21.11%)',
+      '31.424835',
+      '21.70%',
+    ].join('\n'),
+    paragraphs: [],
+    raw: {},
+  };
+
+  const result = await parseHoldingsFromVision(vision);
+  assert.equal(result.length, 1);
+  assert.ok(Math.abs((result[0]?.shares ?? 0) - 31.424835) < 0.01);
+});

@@ -533,7 +533,11 @@ function extractFieldValue(text: string, label: string): number | null {
   return parseNumber(match?.[1] ?? null);
 }
 
-function extractFieldFromLines(lines: string[], label: string): number | null {
+function extractFieldFromLines(
+  lines: string[],
+  label: string,
+  options?: { targetValue?: number | null }
+): number | null {
   const inlinePattern = new RegExp(`^${label}\\s*\\$?\\s*([\\d,]+(?:\\.\\d+)?)$`, 'i');
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
@@ -544,19 +548,30 @@ function extractFieldFromLines(lines: string[], label: string): number | null {
       if (parsed !== null) return parsed;
     }
     if (line.trim().toLowerCase() === label.toLowerCase()) {
-      const candidates: number[] = [];
+      const candidates: Array<{ value: number; distance: number }> = [];
       for (let offset = 1; offset <= 8; offset += 1) {
         const candidate = lines[index + offset];
         if (!candidate) continue;
         const numeric = candidate.match(/[\d,]+(?:\.\d+)?/);
         const parsed = parseNumber(numeric?.[0] ?? null);
         if (parsed !== null) {
-          candidates.push(parsed);
+          candidates.push({ value: parsed, distance: offset });
         }
       }
       if (candidates.length) {
-        const sorted = candidates.filter((value) => value > 0).sort((a, b) => b - a);
-        return sorted[0] ?? null;
+        const positive = candidates.filter((candidate) => candidate.value > 0);
+        const targetValue = options?.targetValue;
+        if (targetValue && Number.isFinite(targetValue)) {
+          const best = positive
+            .map((candidate) => ({
+              ...candidate,
+              delta: Math.abs(candidate.value - targetValue),
+            }))
+            .sort((a, b) => a.delta - b.delta || a.distance - b.distance)[0];
+          return best?.value ?? null;
+        }
+        const nearest = positive.sort((a, b) => a.distance - b.distance)[0];
+        return nearest?.value ?? null;
       }
     }
   }
@@ -597,17 +612,20 @@ async function parseSingleStockDetail(result: VisionAnalysisResult): Promise<Dra
   }
   if (!ticker) return [];
 
+  const shareTarget =
+    marketValue && costBasis ? marketValue / costBasis : null;
+  const costBasis = extractFieldValue(text, 'Your average cost') ?? extractFieldValue(text, 'Average cost') ?? null;
+  const marketValue = extractFieldValue(text, 'Your market value') ?? extractFieldValue(text, 'Market value') ?? null;
+  const shareTarget = marketValue && costBasis ? marketValue / costBasis : null;
   const shares =
-    extractFieldFromLines(lines, 'Shares') ??
-    extractFieldFromLines(lines, 'Share') ??
-    extractFieldFromLines(lines, 'Qty') ??
-    extractFieldFromLines(lines, 'Quantity') ??
+    extractFieldFromLines(lines, 'Shares', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Share', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Qty', { targetValue: shareTarget }) ??
+    extractFieldFromLines(lines, 'Quantity', { targetValue: shareTarget }) ??
     extractFieldValue(text, 'Shares') ??
     extractFieldValue(text, 'Share') ??
     extractFieldValue(text, 'Qty') ??
     null;
-  const costBasis = extractFieldValue(text, 'Your average cost') ?? extractFieldValue(text, 'Average cost') ?? null;
-  const marketValue = extractFieldValue(text, 'Your market value') ?? extractFieldValue(text, 'Market value') ?? null;
 
   return [
     {
