@@ -43,6 +43,9 @@ export default function PortfolioPage() {
   const [error, setError] = useState<string | null>(null);
   const [tipsVisible, setTipsVisible] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [draftInputs, setDraftInputs] = useState<
+    Record<string, Partial<Record<'shares' | 'costBasis' | 'marketValue', string>>>
+  >({});
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
   const [savingHoldings, setSavingHoldings] = useState(false);
@@ -347,6 +350,41 @@ export default function PortfolioPage() {
       return;
     }
     applyDraftUpdate((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const setDraftInputValue = (id: string, field: 'shares' | 'costBasis' | 'marketValue', value: string) => {
+    setDraftInputs((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        [field]: value,
+      },
+    }));
+  };
+
+  const clearDraftInputValue = (id: string, field: 'shares' | 'costBasis' | 'marketValue') => {
+    setDraftInputs((prev) => {
+      const current = prev[id];
+      if (!current) return prev;
+      const { [field]: _removed, ...rest } = current;
+      const next = { ...prev };
+      if (Object.keys(rest).length === 0) {
+        delete next[id];
+      } else {
+        next[id] = rest;
+      }
+      return next;
+    });
+  };
+
+  const getDraftInputValue = (
+    draft: DraftRow,
+    field: 'shares' | 'costBasis' | 'marketValue'
+  ): string => {
+    const value = draftInputs[draft.id]?.[field];
+    if (value !== undefined) return value;
+    const fallback = draft[field];
+    return fallback === null || fallback === undefined ? '' : String(fallback);
   };
 
   const renderConfidenceBadge = (value?: number | null) => {
@@ -708,16 +746,26 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.shares ?? ''}
-                              onChange={(e) => handleDraftChange(draft.id, 'shares', e.target.value)}
+                              value={getDraftInputValue(draft, 'shares')}
+                              onChange={(e) => setDraftInputValue(draft.id, 'shares', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.shares ?? '';
+                                handleDraftChange(draft.id, 'shares', value);
+                                clearDraftInputValue(draft.id, 'shares');
+                              }}
                               className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.costBasis ?? ''}
+                              value={getDraftInputValue(draft, 'costBasis')}
                               placeholder={costBasisPlaceholder ? costBasisPlaceholder.toString() : undefined}
-                              onChange={(e) => handleDraftChange(draft.id, 'costBasis', e.target.value)}
+                              onChange={(e) => setDraftInputValue(draft.id, 'costBasis', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.costBasis ?? '';
+                                handleDraftChange(draft.id, 'costBasis', value);
+                                clearDraftInputValue(draft.id, 'costBasis');
+                              }}
                               className={`w-28 rounded-md border px-2 py-1 text-sm ${
                                 costBasisMissing
                                   ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/30'
@@ -734,8 +782,13 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.marketValue ?? ''}
-                              onChange={(e) => handleDraftChange(draft.id, 'marketValue', e.target.value)}
+                              value={getDraftInputValue(draft, 'marketValue')}
+                              onChange={(e) => setDraftInputValue(draft.id, 'marketValue', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.marketValue ?? '';
+                                handleDraftChange(draft.id, 'marketValue', value);
+                                clearDraftInputValue(draft.id, 'marketValue');
+                              }}
                               className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
                           </td>
