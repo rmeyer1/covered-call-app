@@ -544,12 +544,19 @@ function extractFieldFromLines(lines: string[], label: string): number | null {
       if (parsed !== null) return parsed;
     }
     if (line.trim().toLowerCase() === label.toLowerCase()) {
-      for (let offset = 1; offset <= 2; offset += 1) {
+      const candidates: number[] = [];
+      for (let offset = 1; offset <= 8; offset += 1) {
         const candidate = lines[index + offset];
         if (!candidate) continue;
         const numeric = candidate.match(/[\d,]+(?:\.\d+)?/);
         const parsed = parseNumber(numeric?.[0] ?? null);
-        if (parsed !== null) return parsed;
+        if (parsed !== null) {
+          candidates.push(parsed);
+        }
+      }
+      if (candidates.length) {
+        const sorted = candidates.filter((value) => value > 0).sort((a, b) => b - a);
+        return sorted[0] ?? null;
       }
     }
   }
