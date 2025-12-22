@@ -215,6 +215,46 @@ export interface PortfolioHoldingsResponse {
   };
 }
 
+export interface PortfolioOptionRow {
+  id: string;
+  user_id: string;
+  ticker: string;
+  share_qty: number;
+  option_strike: number | null;
+  option_expiration: string | null;
+  option_right: 'call' | 'put' | null;
+  cost_basis?: number | null;
+  market_value?: number | null;
+  confidence?: number | null;
+  source?: string | null;
+  upload_id?: string | null;
+  draft_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortfolioOption {
+  id: string;
+  userId: string;
+  ticker: string;
+  shareQty: number;
+  optionStrike: number | null;
+  optionExpiration: string | null;
+  optionRight: 'call' | 'put' | null;
+  costBasis?: number | null;
+  marketValue?: number | null;
+  confidence?: number | null;
+  source?: string | null;
+  uploadId?: string | null;
+  draftId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortfolioOptionsResponse {
+  options: PortfolioOptionRow[];
+}
+
 export type VisionTokenBoundingBox =
   VisionAnalysisResult['paragraphs'][number]['tokens'][number]['boundingBox'];
 

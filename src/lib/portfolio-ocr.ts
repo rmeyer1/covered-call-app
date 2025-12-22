@@ -52,13 +52,13 @@ const tickerBlacklist = new Set([
 ]);
 
 const optionPattern =
-  /(?:^|\s)(\d{1,3})?\s*([A-Z]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\s+(\d{1,2}\/\d{1,2})/i;
+  /([A-Z.]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\b(?:\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2}|[A-Za-z]{3}\s+\d{1,2}(?:,\s*\d{2,4})?))?/i;
 
 interface OptionMatch {
   ticker: string;
   strike: number;
   right: 'call' | 'put';
-  expiration: string;
+  expiration?: string | null;
   quantity?: number | null;
 }
 
@@ -96,17 +96,41 @@ function normalizeTicker(
   return upper;
 }
 
+function findExpiration(text: string): string | null {
+  const iso = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+  const mdY = text.match(/\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/);
+  if (mdY) return mdY[1];
+  const mmm = text.match(/\b([A-Za-z]{3}\s+\d{1,2}(?:,\s*\d{2,4})?)\b/);
+  if (mmm) return mmm[1];
+  return null;
+}
+
+function applyOptionQuantitySign(text: string, quantity: number | null): number | null {
+  if (quantity === null) return null;
+  const normalized = text.toLowerCase();
+  if (/\b(sell|sold|short|write|written)\b/.test(normalized)) {
+    return -Math.abs(quantity);
+  }
+  return quantity;
+}
+
 function parseOptionContract(text: string): OptionMatch | null {
   const match = text.match(optionPattern);
   if (!match) return null;
-  const [, quantityRaw, tickerRaw, strikeRaw, rightRaw, expirationRaw] = match;
+  const [, tickerRaw, strikeRaw, rightRaw, expirationRaw] = match;
   const ticker = normalizeTicker(tickerRaw ?? '');
   const strike = parseNumber(strikeRaw);
   if (!ticker || strike === null) return null;
   const right = rightRaw?.toLowerCase() === 'put' ? 'put' : 'call';
-  const quantity = parseNumber(quantityRaw ?? '') ?? null;
-  const expiration = expirationRaw?.trim() ?? '';
-  if (!expiration) return null;
+  const expiration = expirationRaw?.trim() || findExpiration(text) || null;
+
+  const leadingQuantity = text.match(/(?:^|\s)(-?\d+(?:\.\d+)?)\s+[A-Z.]{1,6}\s+\$?\d/i);
+  const trailingQuantity = text.match(/(?:Call|Put)\b(?:\s+\S+){0,2}\s+(-?\d+(?:\.\d+)?)(?:\s|$)/i);
+  const rawQuantity = leadingQuantity?.[1] ?? trailingQuantity?.[1] ?? null;
+  const baseQuantity = rawQuantity ? parseNumber(rawQuantity) : null;
+  const quantity = applyOptionQuantitySign(text, baseQuantity);
+
   return { ticker, strike, right, expiration, quantity };
 }
 
@@ -467,17 +491,18 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
     if (option) {
       const { source, sliceEnd } = collectContextLines(lines, index);
       const contextLines = lines.slice(index, sliceEnd);
+      const resolvedExpiration = option.expiration ?? findExpiration(source);
       const shares = option.quantity ?? extractSharesFromLines(contextLines);
       const currencyValue = extractCurrencyValue(contextLines);
       const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
 
-    results.push({
-      id: createDraftId(),
-      ticker: option.ticker,
-      shares,
-      assetType: 'option',
+      results.push({
+        id: createDraftId(),
+        ticker: option.ticker,
+        shares,
+        assetType: 'option',
         optionStrike: option.strike,
-        optionExpiration: option.expiration,
+        optionExpiration: resolvedExpiration ?? null,
         optionRight: option.right,
         costBasis: currencyValue ?? null,
       costBasisSource: currencyValue ? 'ocr' : undefined,

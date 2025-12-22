@@ -52,8 +52,10 @@ export default function PortfolioPage() {
   const [savingHoldings, setSavingHoldings] = useState(false);
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
   const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
+  const [deletingOptionId, setDeletingOptionId] = useState<string | null>(null);
   const {
     holdings,
+    options,
     stats: portfolioStats,
     loading: holdingsLoading,
     error: holdingsError,
@@ -474,7 +476,10 @@ export default function PortfolioPage() {
       );
       const isUuid = (value?: string | null) =>
         Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
-      const payload = readyDrafts.map((draft) => {
+      const equityDrafts = readyDrafts.filter((draft) => (draft.assetType ?? 'equity') !== 'option');
+      const optionDrafts = readyDrafts.filter((draft) => (draft.assetType ?? 'equity') === 'option');
+
+      const holdingsPayload = equityDrafts.map((draft) => {
         const existing = historyByTicker.get(draft.ticker.toUpperCase());
         const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
         const brokerValue = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
@@ -499,24 +504,59 @@ export default function PortfolioPage() {
         };
       });
 
-      const res = await fetch('/api/portfolio/holdings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
-        body: JSON.stringify({ holdings: payload, replace: false }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        let message = text;
-        try {
-          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
-          message = parsed?.error ?? message;
-        } catch {
-          // ignore JSON parse errors; fallback to raw text
+      if (holdingsPayload.length) {
+        const res = await fetch('/api/portfolio/holdings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ holdings: holdingsPayload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save holdings (${res.status})`);
         }
-        throw new Error(message || `Failed to save holdings (${res.status})`);
       }
 
-      mergeStocksFromDrafts(readyDrafts);
+      if (optionDrafts.length) {
+        const optionsPayload = optionDrafts.map((draft) => ({
+          id: isUuid(draft.id) ? draft.id : undefined,
+          ticker: draft.ticker,
+          shareQty: draft.shares,
+          optionStrike: draft.optionStrike ?? null,
+          optionExpiration: draft.optionExpiration ?? null,
+          optionRight: draft.optionRight ?? null,
+          costBasis: draft.costBasis ?? null,
+          marketValue: draft.marketValue ?? null,
+          confidence: draft.confidence ?? null,
+          source: draft.broker ?? detectBrokerage(draft.source)?.value ?? null,
+          draftId: isUuid(draft.id) ? draft.id : null,
+          uploadId: draft.uploadId ?? null,
+        }));
+        const res = await fetch('/api/portfolio/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ options: optionsPayload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save options (${res.status})`);
+        }
+      }
+
+      mergeStocksFromDrafts(equityDrafts);
       if (mergeAccounts) {
         const readyKeys = new Set(readyDrafts.map((draft) => draftGroupingKey(draft)));
         const keptRaw = drafts.filter((draft) => !readyKeys.has(draftGroupingKey(draft)));
@@ -570,6 +610,36 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleDeleteOption = async (id: string) => {
+    if (!userId) return;
+    setDeletingOptionId(id);
+    setError(null);
+    try {
+      const res = await fetch('/api/portfolio/options', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to delete option (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to delete option', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete option');
+    } finally {
+      setDeletingOptionId(null);
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -583,6 +653,7 @@ export default function PortfolioPage() {
       {mode === 'dashboard' ? (
         <PortfolioDashboard
           holdings={holdings}
+          options={options}
           stats={portfolioStats}
           loading={holdingsLoading}
           error={holdingsError}
@@ -590,6 +661,8 @@ export default function PortfolioPage() {
           onRefresh={handleRefreshHoldings}
           onDeleteHolding={handleDeleteHolding}
           deletingId={deletingHoldingId}
+          onDeleteOption={handleDeleteOption}
+          deletingOptionId={deletingOptionId}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">

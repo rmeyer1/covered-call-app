@@ -1,6 +1,14 @@
-import { mapHoldingRows } from '@/lib/portfolio';
+import { mapHoldingRows, mapOptionRows } from '@/lib/portfolio';
 import { parseNumber } from '@/lib/portfolio-ocr';
-import type { DraftRow, PortfolioHolding, PortfolioHoldingsResponse, RemoteDraft, Stock } from '@/types';
+import type {
+  DraftRow,
+  PortfolioHolding,
+  PortfolioHoldingsResponse,
+  PortfolioOption,
+  PortfolioOptionsResponse,
+  RemoteDraft,
+  Stock,
+} from '@/types';
 
 export const USER_ID_STORAGE_KEY = 'portfolio.userId';
 export const USER_HEADER_KEY = 'x-portfolio-user-id';
@@ -212,11 +220,12 @@ export function formatConfidence(confidence?: number | null) {
 }
 
 export function isDraftReady(draft: DraftRow): boolean {
+  const isOption = draft.assetType === 'option';
   return (
     Boolean(draft.ticker) &&
     typeof draft.shares === 'number' &&
     Number.isFinite(draft.shares) &&
-    draft.shares > 0
+    (isOption ? draft.shares !== 0 : draft.shares > 0)
   );
 }
 
@@ -291,6 +300,26 @@ export async function fetchHoldings(userId: string): Promise<{
     holdings: hydrated,
     stats: calculateStatsFromHoldings(hydrated),
   };
+}
+
+export async function fetchOptions(userId: string): Promise<PortfolioOption[]> {
+  const res = await fetch('/api/portfolio/options', {
+    headers: { [USER_HEADER_KEY]: userId },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let message = text;
+    try {
+      const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+      message = parsed?.error ?? message;
+    } catch {
+      // ignore parse errors and rely on raw response text
+    }
+    throw new Error(message || `Failed to load options (${res.status})`);
+  }
+  const data = (await res.json()) as PortfolioOptionsResponse;
+  const rows = Array.isArray(data?.options) ? data.options : [];
+  return mapOptionRows(rows);
 }
 
 export async function saveDraftsRemote(

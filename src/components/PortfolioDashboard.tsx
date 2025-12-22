@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { RefreshCw, Upload, TrendingUp, Trash2 } from 'lucide-react';
-import type { PortfolioHolding, PortfolioHoldingsResponse } from '@/types';
+import type { PortfolioHolding, PortfolioHoldingsResponse, PortfolioOption } from '@/types';
 import { resolveBrokerLabel } from '@/lib/brokerage';
 import StockDetailsDialog from '@/components/StockDetailsDialog';
 import { calculateStatsFromHoldings } from '@/lib/portfolio-drafts';
 
 interface PortfolioDashboardProps {
   holdings: PortfolioHolding[];
+  options: PortfolioOption[];
   stats?: PortfolioHoldingsResponse['stats'];
   loading?: boolean;
   error?: string | null;
@@ -16,6 +17,8 @@ interface PortfolioDashboardProps {
   onRefresh?: () => void;
   onDeleteHolding?: (id: string) => void;
   deletingId?: string | null;
+  onDeleteOption?: (id: string) => void;
+  deletingOptionId?: string | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -58,6 +61,7 @@ function renderBrokerBadge(value?: string | null) {
 
 export default function PortfolioDashboard({
   holdings,
+  options,
   stats,
   loading,
   error,
@@ -65,6 +69,8 @@ export default function PortfolioDashboard({
   onRefresh,
   onDeleteHolding,
   deletingId,
+  onDeleteOption,
+  deletingOptionId,
 }: PortfolioDashboardProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -79,6 +85,7 @@ export default function PortfolioDashboard({
   };
 
   const hasHoldings = holdings.length > 0;
+  const hasOptions = options.length > 0;
   const totals = stats ?? calculateStatsFromHoldings(holdings);
   const safeTotals = totals ?? { totalValue: 0, totalCost: 0, totalGain: 0 };
 
@@ -124,7 +131,7 @@ export default function PortfolioDashboard({
         <div className="mb-6 text-sm text-gray-600 dark:text-gray-400">Refreshing holdings…</div>
       )}
 
-      {hasHoldings ? (
+      {hasHoldings || hasOptions ? (
         <>
           <section className="grid gap-4 sm:grid-cols-3 mb-8">
             <article className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
@@ -141,7 +148,8 @@ export default function PortfolioDashboard({
             </article>
           </section>
 
-          <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+          {hasHoldings && (
+            <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
             <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
                 <TrendingUp size={16} /> Holdings
@@ -218,6 +226,63 @@ export default function PortfolioDashboard({
               </table>
             </div>
           </section>
+          )}
+
+          {hasOptions && (
+            <section className="mt-6 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+              <header className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 px-4 py-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                  <TrendingUp size={16} /> Options
+                </h2>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{options.length} contracts</span>
+              </header>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs sm:text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                    <tr>
+                      <th className="p-3 text-left">Ticker</th>
+                      <th className="p-3 text-left">Right</th>
+                      <th className="p-3 text-left">Strike</th>
+                      <th className="p-3 text-left">Expiration</th>
+                      <th className="p-3 text-left">Contracts</th>
+                      <th className="p-3 text-left">Cost Basis</th>
+                      <th className="p-3 text-left">Market Value</th>
+                      <th className="p-3 text-left">Confidence</th>
+                      <th className="p-3 text-left">Source</th>
+                      <th className="p-3 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {options.map((option) => (
+                      <tr key={option.id} className="border-t border-gray-200 dark:border-gray-700">
+                        <td className="p-3 font-semibold">{option.ticker}</td>
+                        <td className="p-3">{option.optionRight ? option.optionRight.toUpperCase() : '—'}</td>
+                        <td className="p-3">{formatCurrency(option.optionStrike)}</td>
+                        <td className="p-3">{option.optionExpiration ?? '—'}</td>
+                        <td className="p-3">{formatNumber(option.shareQty)}</td>
+                        <td className="p-3">{formatCurrency(option.costBasis)}</td>
+                        <td className="p-3">{formatCurrency(option.marketValue)}</td>
+                        <td className="p-3">{formatPercent(option.confidence)}</td>
+                        <td className="p-3">{renderBrokerBadge(option.source)}</td>
+                        <td className="p-3">
+                          <button
+                            type="button"
+                            onClick={() => onDeleteOption?.(option.id)}
+                            disabled={!onDeleteOption || deletingOptionId === option.id}
+                            className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 disabled:opacity-60"
+                            aria-label={`Delete ${option.ticker} option`}
+                          >
+                            <Trash2 size={16} />
+                            <span className="text-xs">Delete</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           <StockDetailsDialog
             symbol={selectedTicker}
