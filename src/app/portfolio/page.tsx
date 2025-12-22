@@ -41,6 +41,8 @@ export default function PortfolioPage() {
   const [previews, setPreviews] = useState<UploadPreview[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tipsVisible, setTipsVisible] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
   const [savingHoldings, setSavingHoldings] = useState(false);
@@ -88,6 +90,8 @@ export default function PortfolioPage() {
     setPreviews([]);
     setDrafts([]);
     setMergedDrafts([]);
+    setTipsVisible(false);
+    setFeedbackMessage(null);
     setMode('upload');
   }, []);
 
@@ -185,6 +189,8 @@ export default function PortfolioPage() {
 
   const handleFiles = async (files: FileList | File[]) => {
     setError(null);
+    setTipsVisible(false);
+    setFeedbackMessage(null);
     if (!userId) {
       setError('Cannot upload without a session. Please refresh and try again.');
       return;
@@ -257,8 +263,13 @@ export default function PortfolioPage() {
       }
 
       if (!parsedDrafts.length) {
-        setError('Could not identify any holdings in the uploaded files. Try clearer images.');
+        setTipsVisible(true);
       }
+      console.info('ocr.upload.summary', {
+        uploads: uploadRecords.length,
+        drafts: parsedDrafts.length,
+        selected: parsedDrafts.filter((draft) => draft.selected).length,
+      });
       applyDraftUpdate((prev) => hydrateDrafts([...prev, ...parsedDrafts]));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed';
@@ -336,6 +347,39 @@ export default function PortfolioPage() {
       return;
     }
     applyDraftUpdate((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const renderConfidenceBadge = (value?: number | null) => {
+    const confidence = value ?? 0;
+    const label = formatConfidence(confidence);
+    const tone =
+      confidence >= 0.8
+        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+        : confidence >= 0.5
+          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+          : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+    return (
+      <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${tone}`}>
+        {label}
+      </span>
+    );
+  };
+
+  const handleFeedback = (ok: boolean) => {
+    setFeedbackMessage(ok ? 'Thanks! We will keep refining the OCR.' : 'Thanks! We will use this to improve parsing.');
+    console.info('ocr.feedback', {
+      ok,
+      drafts: activeDrafts.length,
+      uploads: previews.length,
+    });
+  };
+
+  const handleReportIssue = () => {
+    console.warn('ocr.reportIssue', {
+      uploads: previews.map((preview) => preview.path ?? preview.name),
+      drafts: activeDrafts.length,
+    });
+    setFeedbackMessage('Issue report logged. Thanks for the feedback.');
   };
 
   const handleCommit = async () => {
@@ -524,6 +568,17 @@ export default function PortfolioPage() {
             </section>
           )}
 
+          {tipsVisible && (
+            <section className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100">
+              <p className="font-semibold mb-2">Couldn&apos;t detect any holdings.</p>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Try cropping the screenshot to the holdings area.</li>
+                <li>Zoom in so the ticker and share count are readable.</li>
+                <li>Use a light theme if possible to boost OCR clarity.</li>
+              </ul>
+            </section>
+          )}
+
           {activeDrafts.length > 0 && (
             <section className="mb-10">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -569,6 +624,33 @@ export default function PortfolioPage() {
                   <AlertCircle size={16} /> {saveHoldingsError}
                 </div>
               )}
+              <div className="mb-4 flex flex-col gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm text-gray-700 dark:text-gray-200">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-semibold">Did this extract correctly?</span>
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback(true)}
+                    className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+                  >
+                    Yes, looks good
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback(false)}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Needs fixes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReportIssue}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    Report Issue
+                  </button>
+                </div>
+                {feedbackMessage && <p className="text-xs text-gray-600 dark:text-gray-300">{feedbackMessage}</p>}
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs sm:text-sm bg-white dark:bg-gray-800 rounded-md shadow">
                   <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
@@ -657,7 +739,7 @@ export default function PortfolioPage() {
                               className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
                           </td>
-                          <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
+                          <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
                           <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
                             {draft.uploadName ? `${draft.uploadName}${draft.source ? ' — ' : ''}` : ''}
                             {draft.source}
