@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { RefreshCw, Upload, TrendingUp } from 'lucide-react';
+import { RefreshCw, Upload, TrendingUp, Trash2 } from 'lucide-react';
 import type { PortfolioHolding, PortfolioHoldingsResponse } from '@/types';
 import { resolveBrokerLabel } from '@/lib/brokerage';
 import StockDetailsDialog from '@/components/StockDetailsDialog';
@@ -14,6 +14,8 @@ interface PortfolioDashboardProps {
   error?: string | null;
   onUploadClick: () => void;
   onRefresh?: () => void;
+  onDeleteHolding?: (id: string) => void;
+  deletingId?: string | null;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -61,6 +63,8 @@ export default function PortfolioDashboard({
   error,
   onUploadClick,
   onRefresh,
+  onDeleteHolding,
+  deletingId,
 }: PortfolioDashboardProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -157,6 +161,7 @@ export default function PortfolioDashboard({
                     <th className="p-3 text-left">P&L</th>
                     <th className="p-3 text-left">Confidence</th>
                     <th className="p-3 text-left">Source</th>
+                    <th className="p-3 text-left">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -195,6 +200,18 @@ export default function PortfolioDashboard({
                       </td>
                       <td className="p-3">{formatPercent(holding.confidence)}</td>
                       <td className="p-3">{renderBrokerBadge(holding.source)}</td>
+                      <td className="p-3">
+                        <button
+                          type="button"
+                          onClick={() => onDeleteHolding?.(holding.id)}
+                          disabled={!onDeleteHolding || deletingId === holding.id}
+                          className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 disabled:opacity-60"
+                          aria-label={`Delete ${holding.ticker}`}
+                        >
+                          <Trash2 size={16} />
+                          <span className="text-xs">Delete</span>
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -51,6 +51,7 @@ export default function PortfolioPage() {
   const [mode, setMode] = useState<ViewMode>('loading');
   const [savingHoldings, setSavingHoldings] = useState(false);
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
+  const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
   const {
     holdings,
     stats: portfolioStats,
@@ -532,6 +533,36 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleDeleteHolding = async (id: string) => {
+    if (!userId) return;
+    setDeletingHoldingId(id);
+    setError(null);
+    try {
+      const res = await fetch('/api/portfolio/holdings', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to delete holding (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to delete holding', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete holding');
+    } finally {
+      setDeletingHoldingId(null);
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -550,6 +581,8 @@ export default function PortfolioPage() {
           error={holdingsError}
           onUploadClick={handleStartUpload}
           onRefresh={handleRefreshHoldings}
+          onDeleteHolding={handleDeleteHolding}
+          deletingId={deletingHoldingId}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
