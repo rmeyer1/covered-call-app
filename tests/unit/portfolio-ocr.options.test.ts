@@ -21,14 +21,14 @@ test('parses option contracts from list text', async () => {
   assert.equal(c?.optionRight, 'put');
   assert.equal(c?.optionStrike, 14);
   assert.equal(c?.optionExpiration, '1/19');
-  assert.equal(c?.shares, 2);
+  assert.equal(c?.contracts, 2);
 
   assert.ok(a);
   assert.equal(a?.assetType, 'option');
   assert.equal(a?.optionRight, 'call');
   assert.equal(a?.optionStrike, 0.5);
   assert.equal(a?.optionExpiration, '02/16/2026');
-  assert.equal(a?.shares, 3);
+  assert.equal(a?.contracts, 3);
 });
 
 test('parses short option quantities as negative', async () => {
@@ -41,7 +41,8 @@ test('parses short option quantities as negative', async () => {
   const result = await parseHoldingsFromVision(vision);
   assert.equal(result.length, 1);
   assert.equal(result[0]?.assetType, 'option');
-  assert.equal(result[0]?.shares, -1);
+  assert.equal(result[0]?.contracts, 1);
+  assert.equal(result[0]?.buySell, 'sell');
   assert.equal(result[0]?.optionRight, 'call');
   assert.equal(result[0]?.optionStrike, 200);
   assert.equal(result[0]?.optionExpiration, '2025-01-17');

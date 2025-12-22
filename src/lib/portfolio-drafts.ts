@@ -123,6 +123,10 @@ export function mergeDraftRows(
       id: previous?.id ?? key,
       ticker: group[0]?.ticker ?? '',
       shares,
+      contracts: group.some((draft) => typeof draft.contracts === 'number')
+        ? group.reduce((sum, draft) => sum + (draft.contracts ?? 0), 0)
+        : undefined,
+      buySell: group.map((draft) => draft.buySell).find(Boolean) ?? null,
       assetType: group[0]?.assetType ?? 'equity',
       optionStrike: group[0]?.optionStrike ?? null,
       optionExpiration: group[0]?.optionExpiration ?? null,
@@ -221,11 +225,12 @@ export function formatConfidence(confidence?: number | null) {
 
 export function isDraftReady(draft: DraftRow): boolean {
   const isOption = draft.assetType === 'option';
+  const contracts = draft.contracts ?? draft.shares;
   return (
     Boolean(draft.ticker) &&
-    typeof draft.shares === 'number' &&
-    Number.isFinite(draft.shares) &&
-    (isOption ? draft.shares !== 0 : draft.shares > 0)
+    typeof (isOption ? contracts : draft.shares) === 'number' &&
+    Number.isFinite(isOption ? (contracts as number) : (draft.shares as number)) &&
+    (isOption ? (contracts as number) > 0 : (draft.shares as number) > 0)
   );
 }
 
@@ -363,6 +368,11 @@ export async function loadDraftsRemote(userId: string | null): Promise<DraftRow[
         typeof draft.share_qty === 'number'
           ? draft.share_qty
           : parseNumber(String(draft.share_qty ?? '')),
+      contracts:
+        typeof draft.contract_qty === 'number'
+          ? draft.contract_qty
+          : parseNumber(String(draft.contract_qty ?? '')),
+      buySell: draft.buy_sell ?? null,
       assetType: draft.asset_type ?? 'equity',
       optionStrike:
         typeof draft.option_strike === 'number'

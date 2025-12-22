@@ -120,6 +120,8 @@ export interface DraftHolding {
   id: string;
   ticker: string;
   shares: number | null;
+  contracts?: number | null;
+  buySell?: 'buy' | 'sell' | null;
   assetType?: PortfolioAssetType;
   optionStrike?: number | null;
   optionExpiration?: string | null;
@@ -143,6 +145,8 @@ export interface RemoteDraft {
   id?: string;
   ticker?: string | null;
   share_qty?: number | string | null;
+  contract_qty?: number | string | null;
+  buy_sell?: 'buy' | 'sell' | null;
   asset_type?: PortfolioAssetType | null;
   option_strike?: number | string | null;
   option_expiration?: string | null;
@@ -223,6 +227,7 @@ export interface PortfolioOptionRow {
   option_strike: number | null;
   option_expiration: string | null;
   option_right: 'call' | 'put' | null;
+  buy_sell?: 'buy' | 'sell' | null;
   cost_basis?: number | null;
   market_value?: number | null;
   confidence?: number | null;
@@ -241,6 +246,7 @@ export interface PortfolioOption {
   optionStrike: number | null;
   optionExpiration: string | null;
   optionRight: 'call' | 'put' | null;
+  buySell?: 'buy' | 'sell' | null;
   costBasis?: number | null;
   marketValue?: number | null;
   confidence?: number | null;

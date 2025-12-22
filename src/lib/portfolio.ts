@@ -34,6 +34,7 @@ export function mapOptionRow(row: PortfolioOptionRow): PortfolioOption {
     optionStrike: row.option_strike ?? null,
     optionExpiration: row.option_expiration ?? null,
     optionRight: row.option_right ?? null,
+    buySell: row.buy_sell ?? null,
     costBasis: row.cost_basis ?? null,
     marketValue: row.market_value ?? null,
     confidence: row.confidence ?? null,

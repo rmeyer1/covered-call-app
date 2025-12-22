@@ -49,6 +49,8 @@ const tickerBlacklist = new Set([
   'LOSS',
   'AFTER',
   'HOURS',
+  'SELLS',
+  'BUYS',
 ]);
 
 const optionPattern =
@@ -60,6 +62,7 @@ interface OptionMatch {
   right: 'call' | 'put';
   expiration?: string | null;
   quantity?: number | null;
+  buySell?: 'buy' | 'sell' | null;
 }
 
 function createDraftId(): string {
@@ -106,13 +109,18 @@ function findExpiration(text: string): string | null {
   return null;
 }
 
-function applyOptionQuantitySign(text: string, quantity: number | null): number | null {
-  if (quantity === null) return null;
+function resolveOptionSide(text: string, quantity: number | null): 'buy' | 'sell' | null {
   const normalized = text.toLowerCase();
   if (/\b(sell|sold|short|write|written)\b/.test(normalized)) {
-    return -Math.abs(quantity);
+    return 'sell';
   }
-  return quantity;
+  if (/\b(buy|bought|long)\b/.test(normalized)) {
+    return 'buy';
+  }
+  if (quantity !== null) {
+    return quantity < 0 ? 'sell' : 'buy';
+  }
+  return null;
 }
 
 function parseOptionContract(text: string): OptionMatch | null {
@@ -129,9 +137,10 @@ function parseOptionContract(text: string): OptionMatch | null {
   const trailingQuantity = text.match(/(?:Call|Put)\b(?:\s+\S+){0,2}\s+(-?\d+(?:\.\d+)?)(?:\s|$)/i);
   const rawQuantity = leadingQuantity?.[1] ?? trailingQuantity?.[1] ?? null;
   const baseQuantity = rawQuantity ? parseNumber(rawQuantity) : null;
-  const quantity = applyOptionQuantitySign(text, baseQuantity);
+  const buySell = resolveOptionSide(text, baseQuantity);
+  const quantity = baseQuantity === null ? null : Math.abs(baseQuantity);
 
-  return { ticker, strike, right, expiration, quantity };
+  return { ticker, strike, right, expiration, quantity, buySell };
 }
 
 type ViewType = 'table' | 'single' | 'unknown';
@@ -197,10 +206,21 @@ function mapGeminiHoldingToDraftRow(holding: GeminiHoldingsResult['holdings'][nu
   const assetType =
     holding.assetType === 'option' || optionRight || optionStrike || optionExpiration ? 'option' : 'equity';
 
+  const isOption = assetType === 'option';
+  const contracts = isOption && typeof shares === 'number' ? Math.abs(shares) : null;
+  const buySell =
+    isOption && typeof shares === 'number'
+      ? shares < 0
+        ? 'sell'
+        : 'buy'
+      : null;
+
   return {
     id: createDraftId(),
     ticker,
-    shares,
+    shares: isOption ? contracts : shares,
+    contracts: isOption ? contracts : undefined,
+    buySell,
     assetType,
     optionStrike: optionStrike ?? null,
     optionExpiration: optionExpiration ?? null,
@@ -390,10 +410,18 @@ function buildDraftRowFromParagraph(
     (optionMatch ? 0.05 : 0);
   const confidence = Math.min(1, Math.max(0.35, avgConfidence + completenessBoost));
 
+  const contracts = optionMatch ? (sharesValue !== null ? Math.abs(sharesValue) : null) : null;
+  const buySell =
+    optionMatch
+      ? optionMatch.buySell ?? (sharesValue !== null ? (sharesValue < 0 ? 'sell' : 'buy') : null)
+      : null;
+
   return {
     id: createDraftId(),
     ticker,
-    shares: sharesValue,
+    shares: optionMatch ? contracts : sharesValue,
+    contracts: optionMatch ? contracts : undefined,
+    buySell,
     assetType: optionMatch ? 'option' : 'equity',
     optionStrike: optionMatch?.strike ?? null,
     optionExpiration: optionMatch?.expiration ?? null,
@@ -493,13 +521,17 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
       const contextLines = lines.slice(index, sliceEnd);
       const resolvedExpiration = option.expiration ?? findExpiration(source);
       const shares = option.quantity ?? extractSharesFromLines(contextLines);
+      const contracts = shares !== null ? Math.abs(shares) : null;
+      const buySell = option.buySell ?? (shares !== null ? (shares < 0 ? 'sell' : 'buy') : null);
       const currencyValue = extractCurrencyValue(contextLines);
       const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
 
       results.push({
         id: createDraftId(),
         ticker: option.ticker,
-        shares,
+        shares: contracts,
+        contracts,
+        buySell,
         assetType: 'option',
         optionStrike: option.strike,
         optionExpiration: resolvedExpiration ?? null,

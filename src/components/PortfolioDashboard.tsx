@@ -241,6 +241,7 @@ export default function PortfolioDashboard({
                   <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                     <tr>
                       <th className="p-3 text-left">Ticker</th>
+                      <th className="p-3 text-left">Buy/Sell</th>
                       <th className="p-3 text-left">Right</th>
                       <th className="p-3 text-left">Strike</th>
                       <th className="p-3 text-left">Expiration</th>
@@ -256,6 +257,7 @@ export default function PortfolioDashboard({
                     {options.map((option) => (
                       <tr key={option.id} className="border-t border-gray-200 dark:border-gray-700">
                         <td className="p-3 font-semibold">{option.ticker}</td>
+                        <td className="p-3">{option.buySell ? option.buySell.toUpperCase() : '—'}</td>
                         <td className="p-3">{option.optionRight ? option.optionRight.toUpperCase() : '—'}</td>
                         <td className="p-3">{formatCurrency(option.optionStrike)}</td>
                         <td className="p-3">{option.optionExpiration ?? '—'}</td>

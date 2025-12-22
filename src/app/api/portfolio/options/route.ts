@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
               option_strike: optionStrike,
               option_expiration: optionExpiration,
               option_right: optionRight,
+              buy_sell: row.buy_sell ?? null,
             } satisfies PortfolioOptionRow;
           })
           .filter((row): row is PortfolioOptionRow => row !== null)
@@ -73,6 +74,7 @@ interface OptionPayload {
   id?: string | null;
   ticker?: string | null;
   shareQty?: number | string | null;
+  buySell?: 'buy' | 'sell' | null;
   optionStrike?: number | string | null;
   optionExpiration?: string | null;
   optionRight?: string | null;
@@ -109,6 +111,8 @@ function toOptionRow(body: OptionPayload, userId: string): PortfolioOptionRow | 
       : optionRightRaw.toLowerCase() === 'call'
         ? 'call'
         : null;
+  const buySellRaw = typeof body.buySell === 'string' ? body.buySell : '';
+  const buySell = buySellRaw === 'sell' || buySellRaw === 'buy' ? buySellRaw : null;
   const costBasis = normalizeNumberInput(body.costBasis);
   const marketValue = normalizeNumberInput(body.marketValue);
   const confidence = normalizeNumberInput(body.confidence);
@@ -121,6 +125,7 @@ function toOptionRow(body: OptionPayload, userId: string): PortfolioOptionRow | 
     option_strike: optionStrike,
     option_expiration: optionExpiration,
     option_right: optionRight,
+    buy_sell: buySell,
     cost_basis: costBasis,
     market_value: marketValue,
     confidence,
