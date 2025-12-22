@@ -45,7 +45,7 @@ export default function PortfolioPage() {
   const [tipsVisible, setTipsVisible] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [draftInputs, setDraftInputs] = useState<
-    Record<string, Partial<Record<'shares' | 'costBasis' | 'marketValue', string>>>
+    Record<string, Partial<Record<'ticker' | 'shares' | 'costBasis' | 'marketValue', string>>>
   >({});
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
@@ -354,7 +354,11 @@ export default function PortfolioPage() {
     applyDraftUpdate((prev) => prev.filter((d) => d.id !== id));
   };
 
-  const setDraftInputValue = (id: string, field: 'shares' | 'costBasis' | 'marketValue', value: string) => {
+  const setDraftInputValue = (
+    id: string,
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue',
+    value: string
+  ) => {
     setDraftInputs((prev) => ({
       ...prev,
       [id]: {
@@ -364,7 +368,10 @@ export default function PortfolioPage() {
     }));
   };
 
-  const clearDraftInputValue = (id: string, field: 'shares' | 'costBasis' | 'marketValue') => {
+  const clearDraftInputValue = (
+    id: string,
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
+  ) => {
     setDraftInputs((prev) => {
       const current = prev[id];
       if (!current) return prev;
@@ -381,7 +388,7 @@ export default function PortfolioPage() {
 
   const getDraftInputValue = (
     draft: DraftRow,
-    field: 'shares' | 'costBasis' | 'marketValue'
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
   ): string => {
     const value = draftInputs[draft.id]?.[field];
     if (value !== undefined) return value;
@@ -777,8 +784,13 @@ export default function PortfolioPage() {
                           <td className="p-3">
                             <div className="flex flex-col gap-1">
                               <input
-                                value={draft.ticker}
-                                onChange={(e) => handleDraftChange(draft.id, 'ticker', e.target.value)}
+                                value={getDraftInputValue(draft, 'ticker')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'ticker', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.ticker ?? '';
+                                  handleDraftChange(draft.id, 'ticker', value);
+                                  clearDraftInputValue(draft.id, 'ticker');
+                                }}
                                 className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                               />
                               {draft.assetType === 'option' && (
