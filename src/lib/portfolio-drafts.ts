@@ -132,9 +132,6 @@ export function mergeDraftRows(
     if (previous) {
       return {
         ...base,
-        shares: previous.shares ?? base.shares,
-        costBasis: previous.costBasis ?? base.costBasis,
-        marketValue: previous.marketValue ?? base.marketValue,
         selected: previous.selected,
         source: previous.source ?? base.source,
       };
