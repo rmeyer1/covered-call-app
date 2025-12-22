@@ -125,6 +125,7 @@ export function mergeDraftRows(
       confidence,
       source: previous?.source ?? group[0]?.source,
       parseMode: previous?.parseMode ?? group[0]?.parseMode,
+      broker: previous?.broker ?? group.map((draft) => draft.broker).find(Boolean) ?? null,
       selected: previous?.selected ?? selected,
       uploadId: null,
       uploadName: uploadNames.length > 1 ? `Multiple (${uploadNames.length})` : uploadNames[0] ?? null,
