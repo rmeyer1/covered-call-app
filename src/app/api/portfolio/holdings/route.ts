@@ -275,3 +275,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const userId = resolveUserId(req);
+    if (!userId) {
+      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    }
+    const body = await req.json().catch(() => ({}));
+    const ids: string[] = Array.isArray(body?.ids)
+      ? body.ids.filter((id: unknown) => typeof id === 'string' && id.trim())
+      : typeof body?.id === 'string'
+        ? [body.id]
+        : [];
+    if (!ids.length) {
+      return NextResponse.json({ error: 'holding id(s) required' }, { status: 400 });
+    }
+    const encodedUserId = encodeURIComponent(userId);
+    const encodedIds = ids.map((id) => encodeURIComponent(id)).join(',');
+    await supabaseRestFetch(
+      `/rest/v1/portfolio_holdings?id=in.(${encodedIds})&user_id=eq.${encodedUserId}`,
+      {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' },
+      }
+    );
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to delete holding';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

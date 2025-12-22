@@ -128,6 +128,7 @@ export interface DraftHolding {
   marketValue?: number | null;
   confidence?: number | null;
   source?: string;
+  broker?: string | null;
   uploadId?: string | null;
   uploadName?: string | null;
 }

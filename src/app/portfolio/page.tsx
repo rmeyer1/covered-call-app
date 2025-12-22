@@ -6,6 +6,7 @@ import { Upload, CheckCircle2, AlertCircle, Trash2, Loader2, Shuffle } from 'luc
 import type { DraftHolding, DraftRow } from '@/types';
 import type { VisionAnalysisResult } from '@/lib/vision';
 import { parseHoldingsFromVision, parseNumber } from '@/lib/portfolio-ocr';
+import { BROKERAGE_OPTIONS, detectBrokerage, resolveBrokerLabel } from '@/lib/brokerage';
 import {
   USER_HEADER_KEY,
   USER_ID_STORAGE_KEY,
@@ -41,10 +42,16 @@ export default function PortfolioPage() {
   const [previews, setPreviews] = useState<UploadPreview[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tipsVisible, setTipsVisible] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [draftInputs, setDraftInputs] = useState<
+    Record<string, Partial<Record<'ticker' | 'shares' | 'costBasis' | 'marketValue', string>>>
+  >({});
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
   const [savingHoldings, setSavingHoldings] = useState(false);
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
+  const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
   const {
     holdings,
     stats: portfolioStats,
@@ -88,6 +95,8 @@ export default function PortfolioPage() {
     setPreviews([]);
     setDrafts([]);
     setMergedDrafts([]);
+    setTipsVisible(false);
+    setFeedbackMessage(null);
     setMode('upload');
   }, []);
 
@@ -185,6 +194,8 @@ export default function PortfolioPage() {
 
   const handleFiles = async (files: FileList | File[]) => {
     setError(null);
+    setTipsVisible(false);
+    setFeedbackMessage(null);
     if (!userId) {
       setError('Cannot upload without a session. Please refresh and try again.');
       return;
@@ -257,8 +268,13 @@ export default function PortfolioPage() {
       }
 
       if (!parsedDrafts.length) {
-        setError('Could not identify any holdings in the uploaded files. Try clearer images.');
+        setTipsVisible(true);
       }
+      console.info('ocr.upload.summary', {
+        uploads: uploadRecords.length,
+        drafts: parsedDrafts.length,
+        selected: parsedDrafts.filter((draft) => draft.selected).length,
+      });
       applyDraftUpdate((prev) => hydrateDrafts([...prev, ...parsedDrafts]));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed';
@@ -338,6 +354,94 @@ export default function PortfolioPage() {
     applyDraftUpdate((prev) => prev.filter((d) => d.id !== id));
   };
 
+  const setDraftInputValue = (
+    id: string,
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue',
+    value: string
+  ) => {
+    setDraftInputs((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        [field]: value,
+      },
+    }));
+  };
+
+  const clearDraftInputValue = (
+    id: string,
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
+  ) => {
+    setDraftInputs((prev) => {
+      const current = prev[id];
+      if (!current) return prev;
+      const { [field]: _removed, ...rest } = current;
+      const next = { ...prev };
+      if (Object.keys(rest).length === 0) {
+        delete next[id];
+      } else {
+        next[id] = rest;
+      }
+      return next;
+    });
+  };
+
+  const getDraftInputValue = (
+    draft: DraftRow,
+    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
+  ): string => {
+    const value = draftInputs[draft.id]?.[field];
+    if (value !== undefined) return value;
+    const fallback = draft[field];
+    return fallback === null || fallback === undefined ? '' : String(fallback);
+  };
+
+  const renderConfidenceBadge = (value?: number | null) => {
+    const confidence = value ?? 0;
+    const label = formatConfidence(confidence);
+    const tone =
+      confidence >= 0.8
+        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+        : confidence >= 0.5
+          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+          : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+    return (
+      <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${tone}`}>
+        {label}
+      </span>
+    );
+  };
+
+  const renderBrokerBadge = (value?: string | null) => {
+    const label = resolveBrokerLabel(value);
+    const tone =
+      label === 'Unknown'
+        ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
+        : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200';
+    return (
+      <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold ${tone}`}>
+        {label}
+      </span>
+    );
+  };
+
+  const handleFeedback = (ok: boolean) => {
+    setFeedbackMessage(ok ? 'Thanks! We will keep refining the OCR.' : 'Thanks! We will use this to improve parsing.');
+    console.info('ocr.feedback', {
+      ok,
+      drafts: activeDrafts.length,
+      uploads: previews.length,
+    });
+  };
+
+  const handleReportIssue = () => {
+    console.warn('ocr.reportIssue', {
+      uploads: previews.map((preview) => preview.path ?? preview.name),
+      drafts: activeDrafts.length,
+    });
+    setFeedbackMessage('Issue report logged. Thanks for the feedback.');
+  };
+
   const handleCommit = async () => {
     if (!userId) {
       setError('Cannot save holdings without a session. Please refresh and try again.');
@@ -368,11 +472,14 @@ export default function PortfolioPage() {
       const historyByTicker = new Map(
         holdings.map((holding) => [holding.ticker?.toUpperCase?.() ?? '', holding])
       );
+      const isUuid = (value?: string | null) =>
+        Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
       const payload = readyDrafts.map((draft) => {
         const existing = historyByTicker.get(draft.ticker.toUpperCase());
         const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
+        const brokerValue = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
         return {
-          id: existing?.id ?? draft.id,
+          id: existing?.id ?? (isUuid(draft.id) ? draft.id : undefined),
           ticker: draft.ticker,
           shareQty: draft.shares,
           assetType: draft.assetType ?? existing?.type ?? 'equity',
@@ -386,8 +493,8 @@ export default function PortfolioPage() {
             existing?.marketValue ??
             null,
           confidence: draft.confidence ?? existing?.confidence ?? null,
-          source: draft.source ?? existing?.source ?? null,
-          draftId: draft.id,
+          source: brokerValue ?? existing?.source ?? null,
+          draftId: isUuid(draft.id) ? draft.id : null,
           uploadId: draft.uploadId ?? existing?.uploadId ?? null,
         };
       });
@@ -433,6 +540,36 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleDeleteHolding = async (id: string) => {
+    if (!userId) return;
+    setDeletingHoldingId(id);
+    setError(null);
+    try {
+      const res = await fetch('/api/portfolio/holdings', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to delete holding (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to delete holding', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete holding');
+    } finally {
+      setDeletingHoldingId(null);
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -451,6 +588,8 @@ export default function PortfolioPage() {
           error={holdingsError}
           onUploadClick={handleStartUpload}
           onRefresh={handleRefreshHoldings}
+          onDeleteHolding={handleDeleteHolding}
+          deletingId={deletingHoldingId}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
@@ -524,6 +663,17 @@ export default function PortfolioPage() {
             </section>
           )}
 
+          {tipsVisible && (
+            <section className="mb-8 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-100">
+              <p className="font-semibold mb-2">Couldn&apos;t detect any holdings.</p>
+              <ul className="list-disc pl-5 space-y-1">
+                <li>Try cropping the screenshot to the holdings area.</li>
+                <li>Zoom in so the ticker and share count are readable.</li>
+                <li>Use a light theme if possible to boost OCR clarity.</li>
+              </ul>
+            </section>
+          )}
+
           {activeDrafts.length > 0 && (
             <section className="mb-10">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -569,6 +719,33 @@ export default function PortfolioPage() {
                   <AlertCircle size={16} /> {saveHoldingsError}
                 </div>
               )}
+              <div className="mb-4 flex flex-col gap-3 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 text-sm text-gray-700 dark:text-gray-200">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-semibold">Did this extract correctly?</span>
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback(true)}
+                    className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+                  >
+                    Yes, looks good
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFeedback(false)}
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Needs fixes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReportIssue}
+                    className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/40"
+                  >
+                    Report Issue
+                  </button>
+                </div>
+                {feedbackMessage && <p className="text-xs text-gray-600 dark:text-gray-300">{feedbackMessage}</p>}
+              </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs sm:text-sm bg-white dark:bg-gray-800 rounded-md shadow">
                   <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
@@ -592,6 +769,7 @@ export default function PortfolioPage() {
                       const lastKnownCost = historyHolding?.costBasis ?? undefined;
                       const costBasisPlaceholder =
                         draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
+                      const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
 
                       return (
                         <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
@@ -606,8 +784,13 @@ export default function PortfolioPage() {
                           <td className="p-3">
                             <div className="flex flex-col gap-1">
                               <input
-                                value={draft.ticker}
-                                onChange={(e) => handleDraftChange(draft.id, 'ticker', e.target.value)}
+                                value={getDraftInputValue(draft, 'ticker')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'ticker', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.ticker ?? '';
+                                  handleDraftChange(draft.id, 'ticker', value);
+                                  clearDraftInputValue(draft.id, 'ticker');
+                                }}
                                 className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                               />
                               {draft.assetType === 'option' && (
@@ -626,16 +809,26 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.shares ?? ''}
-                              onChange={(e) => handleDraftChange(draft.id, 'shares', e.target.value)}
+                              value={getDraftInputValue(draft, 'shares')}
+                              onChange={(e) => setDraftInputValue(draft.id, 'shares', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.shares ?? '';
+                                handleDraftChange(draft.id, 'shares', value);
+                                clearDraftInputValue(draft.id, 'shares');
+                              }}
                               className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.costBasis ?? ''}
+                              value={getDraftInputValue(draft, 'costBasis')}
                               placeholder={costBasisPlaceholder ? costBasisPlaceholder.toString() : undefined}
-                              onChange={(e) => handleDraftChange(draft.id, 'costBasis', e.target.value)}
+                              onChange={(e) => setDraftInputValue(draft.id, 'costBasis', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.costBasis ?? '';
+                                handleDraftChange(draft.id, 'costBasis', value);
+                                clearDraftInputValue(draft.id, 'costBasis');
+                              }}
                               className={`w-28 rounded-md border px-2 py-1 text-sm ${
                                 costBasisMissing
                                   ? 'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/30'
@@ -652,15 +845,51 @@ export default function PortfolioPage() {
                           </td>
                           <td className="p-3">
                             <input
-                              value={draft.marketValue ?? ''}
-                              onChange={(e) => handleDraftChange(draft.id, 'marketValue', e.target.value)}
+                              value={getDraftInputValue(draft, 'marketValue')}
+                              onChange={(e) => setDraftInputValue(draft.id, 'marketValue', e.target.value)}
+                              onBlur={() => {
+                                const value = draftInputs[draft.id]?.marketValue ?? '';
+                                handleDraftChange(draft.id, 'marketValue', value);
+                                clearDraftInputValue(draft.id, 'marketValue');
+                              }}
                               className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
                           </td>
-                          <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatConfidence(draft.confidence)}</td>
-                          <td className="p-3 text-xs text-gray-500 dark:text-gray-400 max-w-xs truncate" title={draft.source ?? ''}>
-                            {draft.uploadName ? `${draft.uploadName}${draft.source ? ' — ' : ''}` : ''}
-                            {draft.source}
+                          <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
+                          <td className="p-3">
+                            <div className="flex flex-col gap-2">
+                              {renderBrokerBadge(detectedBroker)}
+                              <select
+                                value={detectedBroker ?? ''}
+                                onChange={(e) => {
+                                  const next = e.target.value || null;
+                                  if (mergeAccounts) {
+                                    const groupKey = findGroupKeyForDraft(draft.id);
+                                    if (!groupKey) return;
+                                    applyDraftUpdate((list) =>
+                                      list.map((item) =>
+                                        draftGroupingKey(item) === groupKey ? { ...item, broker: next } : item
+                                      )
+                                    );
+                                  } else {
+                                    applyDraftUpdate((list) =>
+                                      list.map((item) => (item.id === draft.id ? { ...item, broker: next } : item))
+                                    );
+                                  }
+                                }}
+                                className="w-40 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+                              >
+                                <option value="">Unknown</option>
+                                {BROKERAGE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                              {draft.uploadName && (
+                                <span className="text-[11px] text-gray-400">{draft.uploadName}</span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
                             <button
