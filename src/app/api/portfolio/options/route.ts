@@ -34,20 +34,20 @@ export async function GET(req: NextRequest) {
     );
 
     const options: PortfolioOptionRow[] = Array.isArray(rows)
-      ? rows
-          .map((row) => {
-            const shareQty = normalizeNullableNumber(row.share_qty);
-            if (shareQty === null) return null;
-            const costBasis = normalizeNullableNumber(row.cost_basis);
-            const marketValue = normalizeNullableNumber(row.market_value);
-            const confidence = normalizeNullableNumber(row.confidence);
-            const optionStrike = normalizeNullableNumber(row.option_strike);
-            const optionExpiration =
-              typeof row.option_expiration === 'string' ? row.option_expiration : null;
-            const optionRightRaw = row.option_right;
-            const optionRight =
-              optionRightRaw === 'put' || optionRightRaw === 'call' ? optionRightRaw : null;
-            return {
+      ? rows.flatMap((row) => {
+          const shareQty = normalizeNullableNumber(row.share_qty);
+          if (shareQty === null) return [];
+          const costBasis = normalizeNullableNumber(row.cost_basis);
+          const marketValue = normalizeNullableNumber(row.market_value);
+          const confidence = normalizeNullableNumber(row.confidence);
+          const optionStrike = normalizeNullableNumber(row.option_strike);
+          const optionExpiration =
+            typeof row.option_expiration === 'string' ? row.option_expiration : null;
+          const optionRightRaw = row.option_right;
+          const optionRight =
+            optionRightRaw === 'put' || optionRightRaw === 'call' ? optionRightRaw : null;
+          return [
+            {
               ...row,
               share_qty: shareQty,
               cost_basis: costBasis,
@@ -57,9 +57,9 @@ export async function GET(req: NextRequest) {
               option_expiration: optionExpiration,
               option_right: optionRight,
               buy_sell: row.buy_sell ?? null,
-            } satisfies PortfolioOptionRow;
-          })
-          .filter((row): row is PortfolioOptionRow => row !== null)
+            } satisfies PortfolioOptionRow,
+          ];
+        })
       : [];
 
     const payload: PortfolioOptionsResponse = { options };
