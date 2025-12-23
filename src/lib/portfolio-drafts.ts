@@ -223,9 +223,32 @@ export function formatConfidence(confidence?: number | null) {
   return `${Math.round(confidence * 100)}%`;
 }
 
+export function isTickerFormatValid(ticker: string | null | undefined): boolean {
+  if (!ticker) return false;
+  const normalized = ticker.trim().toUpperCase();
+  if (!normalized) return false;
+  if (normalized.length > 6) return false;
+  return /^[A-Z][A-Z0-9.-]*$/.test(normalized);
+}
+
+export function isOptionExpirationValid(expiration: string | null | undefined): boolean {
+  if (!expiration) return false;
+  const trimmed = expiration.trim();
+  if (!trimmed) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true;
+  if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(trimmed)) return true;
+  if (/^[A-Za-z]{3}\s+\d{1,2}(,\s*\d{2,4})?$/.test(trimmed)) return true;
+  return false;
+}
+
 export function isDraftReady(draft: DraftRow): boolean {
   const isOption = draft.assetType === 'option';
   const contracts = draft.contracts ?? draft.shares;
+  if (!isTickerFormatValid(draft.ticker)) return false;
+  if (isOption) {
+    if (!draft.optionStrike || draft.optionStrike <= 0) return false;
+    if (!isOptionExpirationValid(draft.optionExpiration ?? null)) return false;
+  }
   return (
     Boolean(draft.ticker) &&
     typeof (isOption ? contracts : draft.shares) === 'number' &&

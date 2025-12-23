@@ -13,7 +13,9 @@ import {
   applyDerivedCostBasisToDrafts,
   draftGroupingKey,
   formatConfidence,
+  isOptionExpirationValid,
   isDraftReady,
+  isTickerFormatValid,
   loadDraftsLocal,
   loadDraftsRemote,
   mergeCostBasisFromHistory,
@@ -61,6 +63,20 @@ export default function PortfolioPage() {
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
   const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
   const [deletingOptionId, setDeletingOptionId] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualType, setManualType] = useState<'equity' | 'option'>('equity');
+  const [manualFields, setManualFields] = useState({
+    ticker: '',
+    shares: '',
+    contracts: '',
+    costBasis: '',
+    marketValue: '',
+    optionStrike: '',
+    optionExpiration: '',
+    optionRight: '',
+    buySell: '',
+  });
   const {
     holdings,
     options,
@@ -492,6 +508,158 @@ export default function PortfolioPage() {
     setFeedbackMessage('Issue report logged. Thanks for the feedback.');
   };
 
+  const resetManualForm = useCallback(() => {
+    setManualFields({
+      ticker: '',
+      shares: '',
+      contracts: '',
+      costBasis: '',
+      marketValue: '',
+      optionStrike: '',
+      optionExpiration: '',
+      optionRight: '',
+      buySell: '',
+    });
+    setManualError(null);
+  }, []);
+
+  const handleAddManualDraft = () => {
+    setManualOpen(true);
+    resetManualForm();
+  };
+
+  const handleSaveManualDraft = () => {
+    const ticker = manualFields.ticker.trim().toUpperCase();
+    if (!isTickerFormatValid(ticker)) {
+      setManualError('Enter a valid ticker (A-Z, 1-6 chars).');
+      return;
+    }
+    if (manualType === 'equity') {
+      const shares = parseNumber(manualFields.shares);
+      if (!shares || shares <= 0) {
+        setManualError('Enter a share count greater than zero.');
+        return;
+      }
+      const costBasis = parseNumber(manualFields.costBasis);
+      const marketValue = parseNumber(manualFields.marketValue);
+      const saveEquity = async () => {
+        if (!userId) {
+          setManualError('Missing user session. Please refresh and try again.');
+          return;
+        }
+        const payload = [
+          {
+            ticker,
+            shareQty: shares,
+            assetType: 'equity',
+            costBasis: costBasis ?? null,
+            marketValue: marketValue ?? null,
+            confidence: 1,
+            source: 'manual',
+          },
+        ];
+        const res = await fetch('/api/portfolio/holdings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ holdings: payload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save holding (${res.status})`);
+        }
+        await refreshHoldings();
+        setManualOpen(false);
+        resetManualForm();
+      };
+      void saveEquity().catch((err) => {
+        console.error('Failed to save manual holding', err);
+        setManualError(err instanceof Error ? err.message : 'Failed to save holding');
+      });
+      return;
+    }
+
+    const contracts = parseNumber(manualFields.contracts);
+    if (!contracts || contracts <= 0) {
+      setManualError('Enter a contracts count greater than zero.');
+      return;
+    }
+    const optionStrike = parseNumber(manualFields.optionStrike);
+    if (!optionStrike || optionStrike <= 0) {
+      setManualError('Enter a strike price.');
+      return;
+    }
+    if (!isOptionExpirationValid(manualFields.optionExpiration)) {
+      setManualError('Enter a valid expiration (e.g., 1/17/2026).');
+      return;
+    }
+    const optionRight = manualFields.optionRight === 'call' || manualFields.optionRight === 'put'
+      ? manualFields.optionRight
+      : null;
+    if (!optionRight) {
+      setManualError('Select call or put.');
+      return;
+    }
+    const buySell = manualFields.buySell === 'buy' || manualFields.buySell === 'sell'
+      ? manualFields.buySell
+      : null;
+    if (!buySell) {
+      setManualError('Select buy or sell.');
+      return;
+    }
+    const costBasis = parseNumber(manualFields.costBasis);
+    const marketValue = parseNumber(manualFields.marketValue);
+    const saveOption = async () => {
+      if (!userId) {
+        setManualError('Missing user session. Please refresh and try again.');
+        return;
+      }
+      const payload = [
+        {
+          ticker,
+          shareQty: contracts,
+          optionStrike,
+          optionExpiration: manualFields.optionExpiration.trim(),
+          optionRight,
+          buySell,
+          costBasis: costBasis ?? null,
+          marketValue: marketValue ?? null,
+          confidence: 1,
+          source: 'manual',
+        },
+      ];
+      const res = await fetch('/api/portfolio/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ options: payload, replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to save option (${res.status})`);
+      }
+      await refreshHoldings();
+      setManualOpen(false);
+      resetManualForm();
+    };
+    void saveOption().catch((err) => {
+      console.error('Failed to save manual option', err);
+      setManualError(err instanceof Error ? err.message : 'Failed to save option');
+    });
+  };
+
   const handleCommit = async () => {
     if (!userId) {
       setError('Cannot save holdings without a session. Please refresh and try again.');
@@ -502,6 +670,56 @@ export default function PortfolioPage() {
     if (!readyDrafts.length) {
       setSaveHoldingsError('Select at least one holding with a valid share count.');
       return;
+    }
+
+    const invalidTickers = readyDrafts
+      .filter((draft) => !isTickerFormatValid(draft.ticker))
+      .map((draft) => draft.ticker);
+    if (invalidTickers.length) {
+      setSaveHoldingsError(
+        `Fix invalid tickers: ${invalidTickers.slice(0, 4).join(', ')}${invalidTickers.length > 4 ? '…' : ''}`
+      );
+      return;
+    }
+
+    const invalidOptions = readyDrafts
+      .filter((draft) => (draft.assetType ?? 'equity') === 'option')
+      .filter(
+        (draft) =>
+          !draft.optionStrike ||
+          draft.optionStrike <= 0 ||
+          !isOptionExpirationValid(draft.optionExpiration ?? null)
+      )
+      .map((draft) => draft.ticker);
+    if (invalidOptions.length) {
+      setSaveHoldingsError(
+        `Options need strike/expiration: ${invalidOptions.slice(0, 4).join(', ')}${
+          invalidOptions.length > 4 ? '…' : ''
+        }`
+      );
+      return;
+    }
+
+    const uniqueTickers = Array.from(new Set(readyDrafts.map((draft) => draft.ticker.toUpperCase())));
+    if (uniqueTickers.length) {
+      try {
+        const validateRes = await fetch(
+          `/api/stocks/validate?symbols=${encodeURIComponent(uniqueTickers.join(','))}`
+        );
+        if (!validateRes.ok) {
+          const text = await validateRes.text().catch(() => '');
+          throw new Error(text || `Ticker validation failed (${validateRes.status})`);
+        }
+        const data = (await validateRes.json()) as { invalid?: string[] };
+        if (data?.invalid?.length) {
+          setSaveHoldingsError(`Alpaca could not validate: ${data.invalid.slice(0, 4).join(', ')}${data.invalid.length > 4 ? '…' : ''}`);
+          return;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to validate tickers with Alpaca.';
+        setSaveHoldingsError(message);
+        return;
+      }
     }
 
     const missingCost = readyDrafts
@@ -689,6 +907,119 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleUpdateOption = async (
+    id: string,
+    updates: {
+      ticker?: string;
+      shareQty?: number | null;
+      costBasis?: number | null;
+      marketValue?: number | null;
+      optionStrike?: number | null;
+      optionExpiration?: string | null;
+      optionRight?: 'call' | 'put' | null;
+      buySell?: 'buy' | 'sell' | null;
+      source?: string | null;
+    }
+  ) => {
+    if (!userId) return;
+    const option = options.find((row) => row.id === id);
+    if (!option) return;
+    setError(null);
+    try {
+      const payload = {
+        id: option.id,
+        ticker: updates.ticker ?? option.ticker,
+        shareQty: updates.shareQty ?? option.shareQty,
+        optionStrike: updates.optionStrike ?? option.optionStrike ?? null,
+        optionExpiration: updates.optionExpiration ?? option.optionExpiration ?? null,
+        optionRight: updates.optionRight ?? option.optionRight ?? null,
+        buySell: updates.buySell ?? option.buySell ?? null,
+        costBasis: updates.costBasis ?? option.costBasis ?? null,
+        marketValue: updates.marketValue ?? option.marketValue ?? null,
+        confidence: option.confidence ?? null,
+        source: updates.source ?? option.source ?? null,
+        uploadId: option.uploadId ?? null,
+        draftId: option.draftId ?? null,
+      };
+      const res = await fetch('/api/portfolio/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ options: [payload], replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to update option (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to update option', err);
+      setError(err instanceof Error ? err.message : 'Failed to update option');
+    }
+  };
+
+  const handleUpdateHolding = async (
+    id: string,
+    updates: {
+      ticker?: string;
+      shareQty?: number | null;
+      costBasis?: number | null;
+      marketValue?: number | null;
+      type?: 'equity' | 'option' | null;
+      source?: string | null;
+    }
+  ) => {
+    if (!userId) return;
+    const holding = holdings.find((row) => row.id === id);
+    if (!holding) return;
+    setError(null);
+    try {
+      const payload = [
+        {
+          id: holding.id,
+          ticker: updates.ticker ?? holding.ticker,
+          shareQty: updates.shareQty ?? holding.shareQty,
+          assetType: updates.type ?? holding.type ?? 'equity',
+          optionStrike: holding.optionStrike ?? null,
+          optionExpiration: holding.optionExpiration ?? null,
+          optionRight: holding.optionRight ?? null,
+          costBasis: updates.costBasis ?? holding.costBasis ?? null,
+          marketValue: updates.marketValue ?? holding.marketValue ?? null,
+          confidence: holding.confidence ?? null,
+          source: updates.source ?? holding.source ?? null,
+          uploadId: holding.uploadId ?? null,
+          draftId: holding.draftId ?? null,
+        },
+      ];
+      const res = await fetch('/api/portfolio/holdings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ holdings: payload, replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to update holding (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to update holding', err);
+      setError(err instanceof Error ? err.message : 'Failed to update holding');
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -712,6 +1043,8 @@ export default function PortfolioPage() {
           deletingId={deletingHoldingId}
           onDeleteOption={handleDeleteOption}
           deletingOptionId={deletingOptionId}
+          onUpdateHolding={handleUpdateHolding}
+          onUpdateOption={handleUpdateOption}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
@@ -722,14 +1055,23 @@ export default function PortfolioPage() {
                 Upload brokerage screenshots to extract tickers and share counts. Review and approve rows to add them to your holdings.
               </p>
             </div>
-            {holdings.length > 0 && (
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={handleShowDashboard}
+                type="button"
+                onClick={handleAddManualDraft}
                 className="inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
               >
-                View Portfolio
+                Add manual holding
               </button>
-            )}
+              {holdings.length > 0 && (
+                <button
+                  onClick={handleShowDashboard}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                >
+                  View Portfolio
+                </button>
+              )}
+            </div>
           </header>
 
           {holdingsError && (
@@ -753,6 +1095,166 @@ export default function PortfolioPage() {
               </div>
             )}
           </section>
+
+          {manualOpen && (
+            <section className="mb-8 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Manual entry</span>
+                <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setManualType('equity')}
+                    className={`px-3 py-1.5 text-xs font-semibold ${
+                      manualType === 'equity'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    Equity
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualType('option')}
+                    className={`px-3 py-1.5 text-xs font-semibold ${
+                      manualType === 'option'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    Option
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="text-xs text-gray-600 dark:text-gray-300">
+                  Ticker
+                  <input
+                    value={manualFields.ticker}
+                    onChange={(e) => setManualFields((prev) => ({ ...prev, ticker: e.target.value }))}
+                    className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                  />
+                </label>
+                {manualType === 'equity' ? (
+                  <>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Shares
+                      <input
+                        value={manualFields.shares}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, shares: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Cost Basis
+                      <input
+                        value={manualFields.costBasis}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Market Value
+                      <input
+                        value={manualFields.marketValue}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Contracts
+                      <input
+                        value={manualFields.contracts}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, contracts: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Buy/Sell
+                      <select
+                        value={manualFields.buySell}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, buySell: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="buy">Buy</option>
+                        <option value="sell">Sell</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Right
+                      <select
+                        value={manualFields.optionRight}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionRight: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="call">Call</option>
+                        <option value="put">Put</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Strike
+                      <input
+                        value={manualFields.optionStrike}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionStrike: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Expiration
+                      <input
+                        value={manualFields.optionExpiration}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionExpiration: e.target.value }))}
+                        placeholder="1/17/2026"
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Cost Basis
+                      <input
+                        value={manualFields.costBasis}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Market Value
+                      <input
+                        value={manualFields.marketValue}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+              {manualError && (
+                <p className="mt-3 text-xs text-red-600">{manualError}</p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveManualDraft}
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-md"
+                >
+                  Save holding
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualOpen(false);
+                    resetManualForm();
+                  }}
+                  className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-semibold px-3 py-2 rounded-md"
+                >
+                  Cancel
+                </button>
+              </div>
+            </section>
+          )}
 
           {previews.length > 0 && (
             <section className="mb-8">
@@ -803,6 +1305,13 @@ export default function PortfolioPage() {
                   Detected Holdings ({selectedCount} selected, {readyCount} ready)
                 </h2>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={handleAddManualDraft}
+                    className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 text-sm font-semibold px-4 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                  >
+                    Add manual holding
+                  </button>
                   <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
                     <input
                       type="checkbox"
@@ -879,6 +1388,7 @@ export default function PortfolioPage() {
                         <th className="p-3 text-left">Shares</th>
                         <th className="p-3 text-left">Cost Basis</th>
                         <th className="p-3 text-left">Market Value</th>
+                        <th className="p-3 text-left">Live</th>
                         <th className="p-3 text-left">Confidence</th>
                         <th className="p-3 text-left">Source</th>
                         <th />
@@ -893,6 +1403,11 @@ export default function PortfolioPage() {
                         const costBasisPlaceholder =
                           draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
                         const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                        const tickerInput = getDraftInputValue(draft, 'ticker');
+                        const tickerValid = isTickerFormatValid(tickerInput);
+                        const sharesInput = getDraftInputValue(draft, 'shares');
+                        const sharesValue = parseNumber(sharesInput);
+                        const sharesValid = sharesValue !== null && sharesValue > 0;
 
                         return (
                           <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
@@ -914,7 +1429,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'ticker', value);
                                   clearDraftInputValue(draft.id, 'ticker');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  tickerValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                               {draft.assetType === 'option' && (
                                 <div className="text-[11px] text-gray-600 dark:text-gray-300">
@@ -939,7 +1458,11 @@ export default function PortfolioPage() {
                                 handleDraftChange(draft.id, 'shares', value);
                                 clearDraftInputValue(draft.id, 'shares');
                               }}
-                              className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                sharesValid
+                                  ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                  : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                              }`}
                             />
                           </td>
                           <td className="p-3">
@@ -977,6 +1500,36 @@ export default function PortfolioPage() {
                               }}
                               className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
+                          </td>
+                          <td className="p-3">
+                            {historyHolding?.livePrice || historyHolding?.liveGain ? (
+                              <div className="text-xs text-gray-700 dark:text-gray-200">
+                                <div>
+                                  ${historyHolding.livePrice?.toFixed(2) ?? '—'}{' '}
+                                  <span className="text-[11px] text-gray-500">/share</span>
+                                </div>
+                                <div
+                                  className={
+                                    historyHolding.liveGain !== null && historyHolding.liveGain !== undefined
+                                      ? historyHolding.liveGain >= 0
+                                        ? 'text-emerald-600'
+                                        : 'text-rose-600'
+                                      : 'text-gray-500'
+                                  }
+                                >
+                                  {historyHolding.liveGain !== null && historyHolding.liveGain !== undefined
+                                    ? `${historyHolding.liveGain >= 0 ? '+' : ''}$${historyHolding.liveGain.toFixed(2)}`
+                                    : '—'}{' '}
+                                  {historyHolding.liveGainPercent !== null &&
+                                  historyHolding.liveGainPercent !== undefined
+                                    ? `(${(historyHolding.liveGainPercent * 100).toFixed(2)}%)`
+                                    : ''}
+                                </div>
+                                <div className="text-[11px] text-gray-500">from Alpaca</div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
                           </td>
                           <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
                           <td className="p-3">
@@ -1050,6 +1603,16 @@ export default function PortfolioPage() {
                     <tbody>
                       {optionDrafts.map((draft) => {
                         const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                        const tickerInput = getDraftInputValue(draft, 'ticker');
+                        const tickerValid = isTickerFormatValid(tickerInput);
+                        const contractsInput = getDraftInputValue(draft, 'contracts');
+                        const contractsValue = parseNumber(contractsInput);
+                        const contractsValid = contractsValue !== null && contractsValue > 0;
+                        const strikeInput = getDraftInputValue(draft, 'optionStrike');
+                        const strikeValue = parseNumber(strikeInput);
+                        const strikeValid = strikeValue !== null && strikeValue > 0;
+                        const expirationInput = getDraftInputValue(draft, 'optionExpiration');
+                        const expirationValid = isOptionExpirationValid(expirationInput);
                         return (
                           <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
                             <td className="p-3">
@@ -1069,7 +1632,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'ticker', value);
                                   clearDraftInputValue(draft.id, 'ticker');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  tickerValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1086,7 +1653,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'contracts', value);
                                   clearDraftInputValue(draft.id, 'contracts');
                                 }}
-                                className="w-20 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-20 rounded-md border px-2 py-1 text-sm ${
+                                  contractsValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1120,7 +1691,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'optionStrike', value);
                                   clearDraftInputValue(draft.id, 'optionStrike');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  strikeValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1132,7 +1707,11 @@ export default function PortfolioPage() {
                                   handleDraftStringChange(draft.id, 'optionExpiration', value);
                                   clearDraftInputValue(draft.id, 'optionExpiration');
                                 }}
-                                className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-28 rounded-md border px-2 py-1 text-sm ${
+                                  expirationValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
