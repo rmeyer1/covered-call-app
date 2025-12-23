@@ -19,7 +19,7 @@ interface PortfolioDashboardProps {
   deletingId?: string | null;
   onDeleteOption?: (id: string) => void;
   deletingOptionId?: string | null;
-  onUpdateOptionCostBasis?: (id: string, costBasis: number | null) => void;
+  onUpdateOption?: (id: string, updates: { costBasis?: number | null; shareQty?: number | null }) => void;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -72,11 +72,15 @@ export default function PortfolioDashboard({
   deletingId,
   onDeleteOption,
   deletingOptionId,
-  onUpdateOptionCostBasis,
+  onUpdateOption,
 }: PortfolioDashboardProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [optionCostInputs, setOptionCostInputs] = useState<Record<string, string>>({});
+  const [optionContractInputs, setOptionContractInputs] = useState<Record<string, string>>({});
+  const [editingOptionField, setEditingOptionField] = useState<{ id: string; field: 'costBasis' | 'contracts' } | null>(
+    null
+  );
 
   const openDetails = (ticker: string) => {
     setSelectedTicker(ticker);
@@ -106,6 +110,24 @@ export default function PortfolioDashboard({
 
   const clearOptionCostInput = (optionId: string) => {
     setOptionCostInputs((prev) => {
+      const next = { ...prev };
+      delete next[optionId];
+      return next;
+    });
+  };
+
+  const getOptionContractInput = (option: PortfolioOption): string => {
+    const raw = optionContractInputs[option.id];
+    if (raw !== undefined) return raw;
+    return option.shareQty === null || option.shareQty === undefined ? '' : String(option.shareQty);
+  };
+
+  const setOptionContractInput = (optionId: string, value: string) => {
+    setOptionContractInputs((prev) => ({ ...prev, [optionId]: value }));
+  };
+
+  const clearOptionContractInput = (optionId: string) => {
+    setOptionContractInputs((prev) => {
       const next = { ...prev };
       delete next[optionId];
       return next;
@@ -307,24 +329,72 @@ export default function PortfolioDashboard({
                         <td className="p-3">{option.optionRight ? option.optionRight.toUpperCase() : '—'}</td>
                         <td className="p-3">{formatCurrency(option.optionStrike)}</td>
                         <td className="p-3">{option.optionExpiration ?? '—'}</td>
-                        <td className="p-3">{formatNumber(option.shareQty)}</td>
                         <td className="p-3">
-                          <input
-                            value={getOptionCostInput(option)}
-                            onChange={(e) => setOptionCostInput(option.id, e.target.value)}
-                            onBlur={() => {
-                              if (!onUpdateOptionCostBasis) return;
-                              const value = getOptionCostInput(option);
-                              const parsed = parseNumericInput(value);
-                              if (parsed === option.costBasis) {
+                          {editingOptionField?.id === option.id && editingOptionField.field === 'contracts' ? (
+                            <input
+                              value={getOptionContractInput(option)}
+                              onChange={(e) => setOptionContractInput(option.id, e.target.value)}
+                              onBlur={() => {
+                                if (!onUpdateOption) return;
+                                const value = getOptionContractInput(option);
+                                const parsed = parseNumericInput(value);
+                                if (parsed === null) {
+                                  clearOptionContractInput(option.id);
+                                  setEditingOptionField(null);
+                                  return;
+                                }
+                                if (parsed === option.shareQty) {
+                                  clearOptionContractInput(option.id);
+                                  setEditingOptionField(null);
+                                  return;
+                                }
+                                onUpdateOption(option.id, { shareQty: parsed });
+                                clearOptionContractInput(option.id);
+                                setEditingOptionField(null);
+                              }}
+                              className="w-20 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              autoFocus
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setEditingOptionField({ id: option.id, field: 'contracts' })}
+                              className="text-left text-gray-900 dark:text-gray-100 hover:underline"
+                            >
+                              {formatNumber(option.shareQty)}
+                            </button>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {editingOptionField?.id === option.id && editingOptionField.field === 'costBasis' ? (
+                            <input
+                              value={getOptionCostInput(option)}
+                              onChange={(e) => setOptionCostInput(option.id, e.target.value)}
+                              onBlur={() => {
+                                if (!onUpdateOption) return;
+                                const value = getOptionCostInput(option);
+                                const parsed = parseNumericInput(value);
+                                if (parsed === option.costBasis) {
+                                  clearOptionCostInput(option.id);
+                                  setEditingOptionField(null);
+                                  return;
+                                }
+                                onUpdateOption(option.id, { costBasis: parsed });
                                 clearOptionCostInput(option.id);
-                                return;
-                              }
-                              onUpdateOptionCostBasis(option.id, parsed);
-                              clearOptionCostInput(option.id);
-                            }}
-                            className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
+                                setEditingOptionField(null);
+                              }}
+                              className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              autoFocus
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setEditingOptionField({ id: option.id, field: 'costBasis' })}
+                              className="text-left text-gray-900 dark:text-gray-100 hover:underline"
+                            >
+                              {formatCurrency(option.costBasis)}
+                            </button>
+                          )}
                         </td>
                         <td className="p-3">{formatCurrency(option.marketValue)}</td>
                         <td className="p-3">

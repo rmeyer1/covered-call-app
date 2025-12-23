@@ -741,7 +741,10 @@ export default function PortfolioPage() {
     }
   };
 
-  const handleUpdateOptionCostBasis = async (id: string, costBasis: number | null) => {
+  const handleUpdateOption = async (
+    id: string,
+    updates: { costBasis?: number | null; shareQty?: number | null }
+  ) => {
     if (!userId) return;
     const option = options.find((row) => row.id === id);
     if (!option) return;
@@ -750,12 +753,12 @@ export default function PortfolioPage() {
       const payload = {
         id: option.id,
         ticker: option.ticker,
-        shareQty: option.shareQty,
+        shareQty: updates.shareQty ?? option.shareQty,
         optionStrike: option.optionStrike ?? null,
         optionExpiration: option.optionExpiration ?? null,
         optionRight: option.optionRight ?? null,
         buySell: option.buySell ?? null,
-        costBasis,
+        costBasis: updates.costBasis ?? option.costBasis ?? null,
         marketValue: option.marketValue ?? null,
         confidence: option.confidence ?? null,
         source: option.source ?? null,
@@ -780,8 +783,8 @@ export default function PortfolioPage() {
       }
       await refreshHoldings();
     } catch (err) {
-      console.error('Failed to update option cost basis', err);
-      setError(err instanceof Error ? err.message : 'Failed to update option cost basis');
+      console.error('Failed to update option', err);
+      setError(err instanceof Error ? err.message : 'Failed to update option');
     }
   };
 
@@ -808,7 +811,7 @@ export default function PortfolioPage() {
           deletingId={deletingHoldingId}
           onDeleteOption={handleDeleteOption}
           deletingOptionId={deletingOptionId}
-          onUpdateOptionCostBasis={handleUpdateOptionCostBasis}
+          onUpdateOption={handleUpdateOption}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
