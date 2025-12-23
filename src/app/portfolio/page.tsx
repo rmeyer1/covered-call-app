@@ -13,7 +13,9 @@ import {
   applyDerivedCostBasisToDrafts,
   draftGroupingKey,
   formatConfidence,
+  isOptionExpirationValid,
   isDraftReady,
+  isTickerFormatValid,
   loadDraftsLocal,
   loadDraftsRemote,
   mergeCostBasisFromHistory,
@@ -504,6 +506,56 @@ export default function PortfolioPage() {
       return;
     }
 
+    const invalidTickers = readyDrafts
+      .filter((draft) => !isTickerFormatValid(draft.ticker))
+      .map((draft) => draft.ticker);
+    if (invalidTickers.length) {
+      setSaveHoldingsError(
+        `Fix invalid tickers: ${invalidTickers.slice(0, 4).join(', ')}${invalidTickers.length > 4 ? '…' : ''}`
+      );
+      return;
+    }
+
+    const invalidOptions = readyDrafts
+      .filter((draft) => (draft.assetType ?? 'equity') === 'option')
+      .filter(
+        (draft) =>
+          !draft.optionStrike ||
+          draft.optionStrike <= 0 ||
+          !isOptionExpirationValid(draft.optionExpiration ?? null)
+      )
+      .map((draft) => draft.ticker);
+    if (invalidOptions.length) {
+      setSaveHoldingsError(
+        `Options need strike/expiration: ${invalidOptions.slice(0, 4).join(', ')}${
+          invalidOptions.length > 4 ? '…' : ''
+        }`
+      );
+      return;
+    }
+
+    const uniqueTickers = Array.from(new Set(readyDrafts.map((draft) => draft.ticker.toUpperCase())));
+    if (uniqueTickers.length) {
+      try {
+        const validateRes = await fetch(
+          `/api/stocks/validate?symbols=${encodeURIComponent(uniqueTickers.join(','))}`
+        );
+        if (!validateRes.ok) {
+          const text = await validateRes.text().catch(() => '');
+          throw new Error(text || `Ticker validation failed (${validateRes.status})`);
+        }
+        const data = (await validateRes.json()) as { invalid?: string[] };
+        if (data?.invalid?.length) {
+          setSaveHoldingsError(`Alpaca could not validate: ${data.invalid.slice(0, 4).join(', ')}${data.invalid.length > 4 ? '…' : ''}`);
+          return;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to validate tickers with Alpaca.';
+        setSaveHoldingsError(message);
+        return;
+      }
+    }
+
     const missingCost = readyDrafts
       .map((draft) => ({
         draft,
@@ -879,6 +931,7 @@ export default function PortfolioPage() {
                         <th className="p-3 text-left">Shares</th>
                         <th className="p-3 text-left">Cost Basis</th>
                         <th className="p-3 text-left">Market Value</th>
+                        <th className="p-3 text-left">Live</th>
                         <th className="p-3 text-left">Confidence</th>
                         <th className="p-3 text-left">Source</th>
                         <th />
@@ -893,6 +946,11 @@ export default function PortfolioPage() {
                         const costBasisPlaceholder =
                           draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
                         const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                        const tickerInput = getDraftInputValue(draft, 'ticker');
+                        const tickerValid = isTickerFormatValid(tickerInput);
+                        const sharesInput = getDraftInputValue(draft, 'shares');
+                        const sharesValue = parseNumber(sharesInput);
+                        const sharesValid = sharesValue !== null && sharesValue > 0;
 
                         return (
                           <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
@@ -914,7 +972,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'ticker', value);
                                   clearDraftInputValue(draft.id, 'ticker');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  tickerValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                               {draft.assetType === 'option' && (
                                 <div className="text-[11px] text-gray-600 dark:text-gray-300">
@@ -939,7 +1001,11 @@ export default function PortfolioPage() {
                                 handleDraftChange(draft.id, 'shares', value);
                                 clearDraftInputValue(draft.id, 'shares');
                               }}
-                              className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                sharesValid
+                                  ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                  : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                              }`}
                             />
                           </td>
                           <td className="p-3">
@@ -977,6 +1043,36 @@ export default function PortfolioPage() {
                               }}
                               className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
                             />
+                          </td>
+                          <td className="p-3">
+                            {historyHolding?.livePrice || historyHolding?.liveGain ? (
+                              <div className="text-xs text-gray-700 dark:text-gray-200">
+                                <div>
+                                  ${historyHolding.livePrice?.toFixed(2) ?? '—'}{' '}
+                                  <span className="text-[11px] text-gray-500">/share</span>
+                                </div>
+                                <div
+                                  className={
+                                    historyHolding.liveGain !== null && historyHolding.liveGain !== undefined
+                                      ? historyHolding.liveGain >= 0
+                                        ? 'text-emerald-600'
+                                        : 'text-rose-600'
+                                      : 'text-gray-500'
+                                  }
+                                >
+                                  {historyHolding.liveGain !== null && historyHolding.liveGain !== undefined
+                                    ? `${historyHolding.liveGain >= 0 ? '+' : ''}$${historyHolding.liveGain.toFixed(2)}`
+                                    : '—'}{' '}
+                                  {historyHolding.liveGainPercent !== null &&
+                                  historyHolding.liveGainPercent !== undefined
+                                    ? `(${(historyHolding.liveGainPercent * 100).toFixed(2)}%)`
+                                    : ''}
+                                </div>
+                                <div className="text-[11px] text-gray-500">from Alpaca</div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
                           </td>
                           <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
                           <td className="p-3">
@@ -1050,6 +1146,16 @@ export default function PortfolioPage() {
                     <tbody>
                       {optionDrafts.map((draft) => {
                         const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                        const tickerInput = getDraftInputValue(draft, 'ticker');
+                        const tickerValid = isTickerFormatValid(tickerInput);
+                        const contractsInput = getDraftInputValue(draft, 'contracts');
+                        const contractsValue = parseNumber(contractsInput);
+                        const contractsValid = contractsValue !== null && contractsValue > 0;
+                        const strikeInput = getDraftInputValue(draft, 'optionStrike');
+                        const strikeValue = parseNumber(strikeInput);
+                        const strikeValid = strikeValue !== null && strikeValue > 0;
+                        const expirationInput = getDraftInputValue(draft, 'optionExpiration');
+                        const expirationValid = isOptionExpirationValid(expirationInput);
                         return (
                           <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
                             <td className="p-3">
@@ -1069,7 +1175,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'ticker', value);
                                   clearDraftInputValue(draft.id, 'ticker');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  tickerValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1086,7 +1196,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'contracts', value);
                                   clearDraftInputValue(draft.id, 'contracts');
                                 }}
-                                className="w-20 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-20 rounded-md border px-2 py-1 text-sm ${
+                                  contractsValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1120,7 +1234,11 @@ export default function PortfolioPage() {
                                   handleDraftChange(draft.id, 'optionStrike', value);
                                   clearDraftInputValue(draft.id, 'optionStrike');
                                 }}
-                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-24 rounded-md border px-2 py-1 text-sm ${
+                                  strikeValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
@@ -1132,7 +1250,11 @@ export default function PortfolioPage() {
                                   handleDraftStringChange(draft.id, 'optionExpiration', value);
                                   clearDraftInputValue(draft.id, 'optionExpiration');
                                 }}
-                                className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                                className={`w-28 rounded-md border px-2 py-1 text-sm ${
+                                  expirationValid
+                                    ? 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900'
+                                    : 'border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-900/30'
+                                }`}
                               />
                             </td>
                             <td className="p-3">
