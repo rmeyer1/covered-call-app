@@ -289,6 +289,12 @@ export default function PortfolioDashboard({
                         cost !== null && market !== null
                           ? (market - cost) * contracts * contractMultiplier
                           : null;
+                      const totalCost =
+                        cost !== null ? cost * contracts * contractMultiplier : null;
+                      const pnlPercent =
+                        pnl !== null && totalCost
+                          ? pnl / totalCost
+                          : null;
                       const pnlClass =
                         pnl !== null && pnl >= 0
                           ? 'text-green-600 dark:text-green-400'
@@ -323,6 +329,7 @@ export default function PortfolioDashboard({
                         <td className="p-3">
                           <div className={pnlClass}>
                             <div>{formatCurrency(pnl)}</div>
+                            <div className="text-[11px]">{formatPercent(pnlPercent)}</div>
                           </div>
                         </td>
                         <td className="p-3">{renderBrokerBadge(option.source)}</td>
