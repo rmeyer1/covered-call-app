@@ -909,7 +909,17 @@ export default function PortfolioPage() {
 
   const handleUpdateOption = async (
     id: string,
-    updates: { costBasis?: number | null; shareQty?: number | null }
+    updates: {
+      ticker?: string;
+      shareQty?: number | null;
+      costBasis?: number | null;
+      marketValue?: number | null;
+      optionStrike?: number | null;
+      optionExpiration?: string | null;
+      optionRight?: 'call' | 'put' | null;
+      buySell?: 'buy' | 'sell' | null;
+      source?: string | null;
+    }
   ) => {
     if (!userId) return;
     const option = options.find((row) => row.id === id);
@@ -918,16 +928,16 @@ export default function PortfolioPage() {
     try {
       const payload = {
         id: option.id,
-        ticker: option.ticker,
+        ticker: updates.ticker ?? option.ticker,
         shareQty: updates.shareQty ?? option.shareQty,
-        optionStrike: option.optionStrike ?? null,
-        optionExpiration: option.optionExpiration ?? null,
-        optionRight: option.optionRight ?? null,
-        buySell: option.buySell ?? null,
+        optionStrike: updates.optionStrike ?? option.optionStrike ?? null,
+        optionExpiration: updates.optionExpiration ?? option.optionExpiration ?? null,
+        optionRight: updates.optionRight ?? option.optionRight ?? null,
+        buySell: updates.buySell ?? option.buySell ?? null,
         costBasis: updates.costBasis ?? option.costBasis ?? null,
-        marketValue: option.marketValue ?? null,
+        marketValue: updates.marketValue ?? option.marketValue ?? null,
         confidence: option.confidence ?? null,
-        source: option.source ?? null,
+        source: updates.source ?? option.source ?? null,
         uploadId: option.uploadId ?? null,
         draftId: option.draftId ?? null,
       };
@@ -954,6 +964,62 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleUpdateHolding = async (
+    id: string,
+    updates: {
+      ticker?: string;
+      shareQty?: number | null;
+      costBasis?: number | null;
+      marketValue?: number | null;
+      type?: 'equity' | 'option' | null;
+      source?: string | null;
+    }
+  ) => {
+    if (!userId) return;
+    const holding = holdings.find((row) => row.id === id);
+    if (!holding) return;
+    setError(null);
+    try {
+      const payload = [
+        {
+          id: holding.id,
+          ticker: updates.ticker ?? holding.ticker,
+          shareQty: updates.shareQty ?? holding.shareQty,
+          assetType: updates.type ?? holding.type ?? 'equity',
+          optionStrike: holding.optionStrike ?? null,
+          optionExpiration: holding.optionExpiration ?? null,
+          optionRight: holding.optionRight ?? null,
+          costBasis: updates.costBasis ?? holding.costBasis ?? null,
+          marketValue: updates.marketValue ?? holding.marketValue ?? null,
+          confidence: holding.confidence ?? null,
+          source: updates.source ?? holding.source ?? null,
+          uploadId: holding.uploadId ?? null,
+          draftId: holding.draftId ?? null,
+        },
+      ];
+      const res = await fetch('/api/portfolio/holdings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ holdings: payload, replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to update holding (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to update holding', err);
+      setError(err instanceof Error ? err.message : 'Failed to update holding');
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -977,6 +1043,7 @@ export default function PortfolioPage() {
           deletingId={deletingHoldingId}
           onDeleteOption={handleDeleteOption}
           deletingOptionId={deletingOptionId}
+          onUpdateHolding={handleUpdateHolding}
           onUpdateOption={handleUpdateOption}
         />
       ) : (
