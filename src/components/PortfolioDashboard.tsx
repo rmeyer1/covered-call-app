@@ -19,6 +19,7 @@ interface PortfolioDashboardProps {
   deletingId?: string | null;
   onDeleteOption?: (id: string) => void;
   deletingOptionId?: string | null;
+  onUpdateOptionCostBasis?: (id: string, costBasis: number | null) => void;
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -71,9 +72,11 @@ export default function PortfolioDashboard({
   deletingId,
   onDeleteOption,
   deletingOptionId,
+  onUpdateOptionCostBasis,
 }: PortfolioDashboardProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [optionCostInputs, setOptionCostInputs] = useState<Record<string, string>>({});
 
   const openDetails = (ticker: string) => {
     setSelectedTicker(ticker);
@@ -82,6 +85,31 @@ export default function PortfolioDashboard({
 
   const closeDetails = () => {
     setDialogOpen(false);
+  };
+
+  const parseNumericInput = (value: string): number | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const getOptionCostInput = (option: PortfolioOption): string => {
+    const raw = optionCostInputs[option.id];
+    if (raw !== undefined) return raw;
+    return option.costBasis === null || option.costBasis === undefined ? '' : String(option.costBasis);
+  };
+
+  const setOptionCostInput = (optionId: string, value: string) => {
+    setOptionCostInputs((prev) => ({ ...prev, [optionId]: value }));
+  };
+
+  const clearOptionCostInput = (optionId: string) => {
+    setOptionCostInputs((prev) => {
+      const next = { ...prev };
+      delete next[optionId];
+      return next;
+    });
   };
 
   const hasHoldings = holdings.length > 0;
@@ -167,7 +195,6 @@ export default function PortfolioDashboard({
                     <th className="p-3 text-left">Live Price</th>
                     <th className="p-3 text-left">Live Value</th>
                     <th className="p-3 text-left">P&L</th>
-                    <th className="p-3 text-left">Confidence</th>
                     <th className="p-3 text-left">Source</th>
                     <th className="p-3 text-left">Actions</th>
                   </tr>
@@ -206,7 +233,6 @@ export default function PortfolioDashboard({
                           <div className="text-[11px]">{formatPercent(holding.liveGainPercent)}</div>
                         </div>
                       </td>
-                      <td className="p-3">{formatPercent(holding.confidence)}</td>
                       <td className="p-3">{renderBrokerBadge(holding.source)}</td>
                       <td className="p-3">
                         <button
@@ -248,7 +274,6 @@ export default function PortfolioDashboard({
                       <th className="p-3 text-left">Contracts</th>
                       <th className="p-3 text-left">Cost Basis</th>
                       <th className="p-3 text-left">Market Value</th>
-                      <th className="p-3 text-left">Confidence</th>
                       <th className="p-3 text-left">Source</th>
                       <th className="p-3 text-left">Actions</th>
                     </tr>
@@ -262,9 +287,25 @@ export default function PortfolioDashboard({
                         <td className="p-3">{formatCurrency(option.optionStrike)}</td>
                         <td className="p-3">{option.optionExpiration ?? '—'}</td>
                         <td className="p-3">{formatNumber(option.shareQty)}</td>
-                        <td className="p-3">{formatCurrency(option.costBasis)}</td>
+                        <td className="p-3">
+                          <input
+                            value={getOptionCostInput(option)}
+                            onChange={(e) => setOptionCostInput(option.id, e.target.value)}
+                            onBlur={() => {
+                              if (!onUpdateOptionCostBasis) return;
+                              const value = getOptionCostInput(option);
+                              const parsed = parseNumericInput(value);
+                              if (parsed === option.costBasis) {
+                                clearOptionCostInput(option.id);
+                                return;
+                              }
+                              onUpdateOptionCostBasis(option.id, parsed);
+                              clearOptionCostInput(option.id);
+                            }}
+                            className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </td>
                         <td className="p-3">{formatCurrency(option.marketValue)}</td>
-                        <td className="p-3">{formatPercent(option.confidence)}</td>
                         <td className="p-3">{renderBrokerBadge(option.source)}</td>
                         <td className="p-3">
                           <button

@@ -741,6 +741,50 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleUpdateOptionCostBasis = async (id: string, costBasis: number | null) => {
+    if (!userId) return;
+    const option = options.find((row) => row.id === id);
+    if (!option) return;
+    setError(null);
+    try {
+      const payload = {
+        id: option.id,
+        ticker: option.ticker,
+        shareQty: option.shareQty,
+        optionStrike: option.optionStrike ?? null,
+        optionExpiration: option.optionExpiration ?? null,
+        optionRight: option.optionRight ?? null,
+        buySell: option.buySell ?? null,
+        costBasis,
+        marketValue: option.marketValue ?? null,
+        confidence: option.confidence ?? null,
+        source: option.source ?? null,
+        uploadId: option.uploadId ?? null,
+        draftId: option.draftId ?? null,
+      };
+      const res = await fetch('/api/portfolio/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ options: [payload], replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to update option (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to update option cost basis', err);
+      setError(err instanceof Error ? err.message : 'Failed to update option cost basis');
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -764,6 +808,7 @@ export default function PortfolioPage() {
           deletingId={deletingHoldingId}
           onDeleteOption={handleDeleteOption}
           deletingOptionId={deletingOptionId}
+          onUpdateOptionCostBasis={handleUpdateOptionCostBasis}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
