@@ -988,14 +988,23 @@ export default function PortfolioPage() {
                 Upload brokerage screenshots to extract tickers and share counts. Review and approve rows to add them to your holdings.
               </p>
             </div>
-            {holdings.length > 0 && (
+            <div className="flex flex-wrap gap-2">
               <button
-                onClick={handleShowDashboard}
+                type="button"
+                onClick={handleAddManualDraft}
                 className="inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
               >
-                View Portfolio
+                Add manual holding
               </button>
-            )}
+              {holdings.length > 0 && (
+                <button
+                  onClick={handleShowDashboard}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-100 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                >
+                  View Portfolio
+                </button>
+              )}
+            </div>
           </header>
 
           {holdingsError && (
