@@ -274,13 +274,26 @@ export default function PortfolioDashboard({
                       <th className="p-3 text-left">Contracts</th>
                       <th className="p-3 text-left">Cost Basis</th>
                       <th className="p-3 text-left">Market Value</th>
+                      <th className="p-3 text-left">P&L</th>
                       <th className="p-3 text-left">Source</th>
                       <th className="p-3 text-left">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {options.map((option) => (
-                      <tr key={option.id} className="border-t border-gray-200 dark:border-gray-700">
+                    {options.map((option) => {
+                      const cost = option.costBasis ?? null;
+                      const market = option.marketValue ?? null;
+                      const contracts = option.shareQty ?? 0;
+                      const pnl =
+                        cost !== null && market !== null
+                          ? (market - cost) * contracts
+                          : null;
+                      const pnlClass =
+                        pnl !== null && pnl >= 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400';
+                      return (
+                        <tr key={option.id} className="border-t border-gray-200 dark:border-gray-700">
                         <td className="p-3 font-semibold">{option.ticker}</td>
                         <td className="p-3">{option.buySell ? option.buySell.toUpperCase() : '—'}</td>
                         <td className="p-3">{option.optionRight ? option.optionRight.toUpperCase() : '—'}</td>
@@ -306,6 +319,11 @@ export default function PortfolioDashboard({
                           />
                         </td>
                         <td className="p-3">{formatCurrency(option.marketValue)}</td>
+                        <td className="p-3">
+                          <div className={pnlClass}>
+                            <div>{formatCurrency(pnl)}</div>
+                          </div>
+                        </td>
                         <td className="p-3">{renderBrokerBadge(option.source)}</td>
                         <td className="p-3">
                           <button
@@ -320,7 +338,8 @@ export default function PortfolioDashboard({
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
