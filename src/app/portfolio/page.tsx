@@ -63,6 +63,20 @@ export default function PortfolioPage() {
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
   const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
   const [deletingOptionId, setDeletingOptionId] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualType, setManualType] = useState<'equity' | 'option'>('equity');
+  const [manualFields, setManualFields] = useState({
+    ticker: '',
+    shares: '',
+    contracts: '',
+    costBasis: '',
+    marketValue: '',
+    optionStrike: '',
+    optionExpiration: '',
+    optionRight: '',
+    buySell: '',
+  });
   const {
     holdings,
     options,
@@ -494,6 +508,113 @@ export default function PortfolioPage() {
     setFeedbackMessage('Issue report logged. Thanks for the feedback.');
   };
 
+  const resetManualForm = useCallback(() => {
+    setManualFields({
+      ticker: '',
+      shares: '',
+      contracts: '',
+      costBasis: '',
+      marketValue: '',
+      optionStrike: '',
+      optionExpiration: '',
+      optionRight: '',
+      buySell: '',
+    });
+    setManualError(null);
+  }, []);
+
+  const handleAddManualDraft = () => {
+    setManualOpen(true);
+    resetManualForm();
+  };
+
+  const handleSaveManualDraft = () => {
+    const ticker = manualFields.ticker.trim().toUpperCase();
+    if (!isTickerFormatValid(ticker)) {
+      setManualError('Enter a valid ticker (A-Z, 1-6 chars).');
+      return;
+    }
+    if (manualType === 'equity') {
+      const shares = parseNumber(manualFields.shares);
+      if (!shares || shares <= 0) {
+        setManualError('Enter a share count greater than zero.');
+        return;
+      }
+      const costBasis = parseNumber(manualFields.costBasis);
+      const marketValue = parseNumber(manualFields.marketValue);
+      const draft: DraftRow = {
+        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ticker,
+        shares,
+        costBasis: costBasis ?? null,
+        costBasisSource: costBasis !== null && costBasis !== undefined ? 'manual' : undefined,
+        marketValue: marketValue ?? null,
+        confidence: 1,
+        source: 'manual',
+        parseMode: 'manual',
+        selected: true,
+        uploadName: 'Manual entry',
+      };
+      applyDraftUpdate((prev) => [...prev, draft]);
+      setManualOpen(false);
+      resetManualForm();
+      return;
+    }
+
+    const contracts = parseNumber(manualFields.contracts);
+    if (!contracts || contracts <= 0) {
+      setManualError('Enter a contracts count greater than zero.');
+      return;
+    }
+    const optionStrike = parseNumber(manualFields.optionStrike);
+    if (!optionStrike || optionStrike <= 0) {
+      setManualError('Enter a strike price.');
+      return;
+    }
+    if (!isOptionExpirationValid(manualFields.optionExpiration)) {
+      setManualError('Enter a valid expiration (e.g., 1/17/2026).');
+      return;
+    }
+    const optionRight = manualFields.optionRight === 'call' || manualFields.optionRight === 'put'
+      ? manualFields.optionRight
+      : null;
+    if (!optionRight) {
+      setManualError('Select call or put.');
+      return;
+    }
+    const buySell = manualFields.buySell === 'buy' || manualFields.buySell === 'sell'
+      ? manualFields.buySell
+      : null;
+    if (!buySell) {
+      setManualError('Select buy or sell.');
+      return;
+    }
+    const costBasis = parseNumber(manualFields.costBasis);
+    const marketValue = parseNumber(manualFields.marketValue);
+    const draft: DraftRow = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ticker,
+      shares: contracts,
+      contracts,
+      buySell,
+      assetType: 'option',
+      optionStrike,
+      optionExpiration: manualFields.optionExpiration.trim(),
+      optionRight,
+      costBasis: costBasis ?? null,
+      costBasisSource: costBasis !== null && costBasis !== undefined ? 'manual' : undefined,
+      marketValue: marketValue ?? null,
+      confidence: 1,
+      source: 'manual',
+      parseMode: 'manual',
+      selected: true,
+      uploadName: 'Manual entry',
+    };
+    applyDraftUpdate((prev) => [...prev, draft]);
+    setManualOpen(false);
+    resetManualForm();
+  };
+
   const handleCommit = async () => {
     if (!userId) {
       setError('Cannot save holdings without a session. Please refresh and try again.');
@@ -903,6 +1024,13 @@ export default function PortfolioPage() {
                   Detected Holdings ({selectedCount} selected, {readyCount} ready)
                 </h2>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={handleAddManualDraft}
+                    className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 text-sm font-semibold px-4 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                  >
+                    Add manual holding
+                  </button>
                   <label className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
                     <input
                       type="checkbox"
@@ -926,6 +1054,165 @@ export default function PortfolioPage() {
                   </button>
                 </div>
               </div>
+              {manualOpen && (
+                <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                  <div className="flex flex-wrap items-center gap-3 mb-3">
+                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Manual entry</span>
+                    <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setManualType('equity')}
+                        className={`px-3 py-1.5 text-xs font-semibold ${
+                          manualType === 'equity'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                        }`}
+                      >
+                        Equity
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManualType('option')}
+                        className={`px-3 py-1.5 text-xs font-semibold ${
+                          manualType === 'option'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                        }`}
+                      >
+                        Option
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Ticker
+                      <input
+                        value={manualFields.ticker}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, ticker: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    {manualType === 'equity' ? (
+                      <>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Shares
+                          <input
+                            value={manualFields.shares}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, shares: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Cost Basis
+                          <input
+                            value={manualFields.costBasis}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Market Value
+                          <input
+                            value={manualFields.marketValue}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Contracts
+                          <input
+                            value={manualFields.contracts}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, contracts: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Buy/Sell
+                          <select
+                            value={manualFields.buySell}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, buySell: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          >
+                            <option value="">Select</option>
+                            <option value="buy">Buy</option>
+                            <option value="sell">Sell</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Right
+                          <select
+                            value={manualFields.optionRight}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionRight: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          >
+                            <option value="">Select</option>
+                            <option value="call">Call</option>
+                            <option value="put">Put</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Strike
+                          <input
+                            value={manualFields.optionStrike}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionStrike: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Expiration
+                          <input
+                            value={manualFields.optionExpiration}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionExpiration: e.target.value }))}
+                            placeholder="1/17/2026"
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Cost Basis
+                          <input
+                            value={manualFields.costBasis}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-gray-600 dark:text-gray-300">
+                          Market Value
+                          <input
+                            value={manualFields.marketValue}
+                            onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  {manualError && (
+                    <p className="mt-3 text-xs text-red-600">{manualError}</p>
+                  )}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveManualDraft}
+                      className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-md"
+                    >
+                      Save draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualOpen(false);
+                        resetManualForm();
+                      }}
+                      className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-semibold px-3 py-2 rounded-md"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
               {selectedCount > 0 && readyCount === 0 && (
                 <p className="mb-3 text-sm text-amber-600 dark:text-amber-400">
                   Add share counts for the selected rows to continue.
