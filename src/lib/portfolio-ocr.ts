@@ -49,17 +49,20 @@ const tickerBlacklist = new Set([
   'LOSS',
   'AFTER',
   'HOURS',
+  'SELLS',
+  'BUYS',
 ]);
 
 const optionPattern =
-  /(?:^|\s)(\d{1,3})?\s*([A-Z]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\s+(\d{1,2}\/\d{1,2})/i;
+  /([A-Z.]{1,6})\s+\$?(\d+(?:\.\d+)?)\s+(Call|Put)\b(?:\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2}|[A-Za-z]{3}\s+\d{1,2}(?:,\s*\d{2,4})?))?/i;
 
 interface OptionMatch {
   ticker: string;
   strike: number;
   right: 'call' | 'put';
-  expiration: string;
+  expiration?: string | null;
   quantity?: number | null;
+  buySell?: 'buy' | 'sell' | null;
 }
 
 function createDraftId(): string {
@@ -96,18 +99,48 @@ function normalizeTicker(
   return upper;
 }
 
+function findExpiration(text: string): string | null {
+  const iso = text.match(/\b(20\d{2}-\d{2}-\d{2})\b/);
+  if (iso) return iso[1];
+  const mdY = text.match(/\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/);
+  if (mdY) return mdY[1];
+  const mmm = text.match(/\b([A-Za-z]{3}\s+\d{1,2}(?:,\s*\d{2,4})?)\b/);
+  if (mmm) return mmm[1];
+  return null;
+}
+
+function resolveOptionSide(text: string, quantity: number | null): 'buy' | 'sell' | null {
+  const normalized = text.toLowerCase();
+  if (/\b(sell|sells|sold|short|write|written)\b/.test(normalized)) {
+    return 'sell';
+  }
+  if (/\b(buy|buys|bought|long)\b/.test(normalized)) {
+    return 'buy';
+  }
+  if (quantity !== null) {
+    return quantity < 0 ? 'sell' : 'buy';
+  }
+  return null;
+}
+
 function parseOptionContract(text: string): OptionMatch | null {
   const match = text.match(optionPattern);
   if (!match) return null;
-  const [, quantityRaw, tickerRaw, strikeRaw, rightRaw, expirationRaw] = match;
+  const [, tickerRaw, strikeRaw, rightRaw, expirationRaw] = match;
   const ticker = normalizeTicker(tickerRaw ?? '');
   const strike = parseNumber(strikeRaw);
   if (!ticker || strike === null) return null;
   const right = rightRaw?.toLowerCase() === 'put' ? 'put' : 'call';
-  const quantity = parseNumber(quantityRaw ?? '') ?? null;
-  const expiration = expirationRaw?.trim() ?? '';
-  if (!expiration) return null;
-  return { ticker, strike, right, expiration, quantity };
+  const expiration = expirationRaw?.trim() || findExpiration(text) || null;
+
+  const leadingQuantity = text.match(/(?:^|\s)(-?\d+(?:\.\d+)?)\s+[A-Z.]{1,6}\s+\$?\d/i);
+  const trailingQuantity = text.match(/(?:Call|Put)\b(?:\s+\S+){0,2}\s+(-?\d+(?:\.\d+)?)(?:\s|$)/i);
+  const rawQuantity = leadingQuantity?.[1] ?? trailingQuantity?.[1] ?? null;
+  const baseQuantity = rawQuantity ? parseNumber(rawQuantity) : null;
+  const buySell = resolveOptionSide(text, baseQuantity);
+  const quantity = baseQuantity === null ? null : Math.abs(baseQuantity);
+
+  return { ticker, strike, right, expiration, quantity, buySell };
 }
 
 type ViewType = 'table' | 'single' | 'unknown';
@@ -173,10 +206,21 @@ function mapGeminiHoldingToDraftRow(holding: GeminiHoldingsResult['holdings'][nu
   const assetType =
     holding.assetType === 'option' || optionRight || optionStrike || optionExpiration ? 'option' : 'equity';
 
+  const isOption = assetType === 'option';
+  const contracts = isOption && typeof shares === 'number' ? Math.abs(shares) : null;
+  const buySell =
+    isOption && typeof shares === 'number'
+      ? shares < 0
+        ? 'sell'
+        : 'buy'
+      : null;
+
   return {
     id: createDraftId(),
     ticker,
-    shares,
+    shares: isOption ? contracts : shares,
+    contracts: isOption ? contracts : undefined,
+    buySell,
     assetType,
     optionStrike: optionStrike ?? null,
     optionExpiration: optionExpiration ?? null,
@@ -293,13 +337,15 @@ function hasMagnitudeSuffix(candidate?: { raw?: string | null }): boolean {
 }
 
 function buildDraftRowFromParagraph(
-  paragraph: VisionAnalysisResult['paragraphs'][number]
+  paragraph: VisionAnalysisResult['paragraphs'][number],
+  optionsOnly: boolean
 ): DraftRow | null {
   if (!paragraph?.text || isHeaderParagraph(paragraph)) return null;
   const tokens = tokenizeParagraph(paragraph);
   if (!tokens.length) return null;
 
   const optionMatch = parseOptionContract(paragraph.text ?? '');
+  if (optionsOnly && !optionMatch) return null;
   const tickerToken =
     tokens.find((token) => normalizeTicker(token.text) !== null) ??
     (optionMatch
@@ -337,6 +383,16 @@ function buildDraftRowFromParagraph(
   let resolvedCostSource: DraftRow['costBasisSource'] = costCandidate ? 'ocr' : undefined;
   let resolvedMarketValue = marketCandidate?.value ?? costCandidate?.value ?? null;
 
+  if (optionMatch && optionMatch.strike !== null) {
+    if (resolvedCostBasis !== null && Math.abs(resolvedCostBasis - optionMatch.strike) < 1e-6) {
+      resolvedCostBasis = null;
+      resolvedCostSource = undefined;
+    }
+    if (resolvedMarketValue !== null && Math.abs(resolvedMarketValue - optionMatch.strike) < 1e-6) {
+      resolvedMarketValue = null;
+    }
+  }
+
   if (
     costCandidate &&
     sharesValue &&
@@ -366,10 +422,18 @@ function buildDraftRowFromParagraph(
     (optionMatch ? 0.05 : 0);
   const confidence = Math.min(1, Math.max(0.35, avgConfidence + completenessBoost));
 
+  const contracts = optionMatch ? (sharesValue !== null ? Math.abs(sharesValue) : null) : null;
+  const buySell =
+    optionMatch
+      ? optionMatch.buySell ?? (sharesValue !== null ? (sharesValue < 0 ? 'sell' : 'buy') : null)
+      : null;
+
   return {
     id: createDraftId(),
     ticker,
-    shares: sharesValue,
+    shares: optionMatch ? contracts : sharesValue,
+    contracts: optionMatch ? contracts : undefined,
+    buySell,
     assetType: optionMatch ? 'option' : 'equity',
     optionStrike: optionMatch?.strike ?? null,
     optionExpiration: optionMatch?.expiration ?? null,
@@ -384,8 +448,9 @@ function buildDraftRowFromParagraph(
   } satisfies DraftRow;
 }
 
-function parseHoldingsFromParagraphs(result: VisionAnalysisResult): DraftRow[] {
-  const candidates = result.paragraphs?.map((paragraph) => buildDraftRowFromParagraph(paragraph)) ?? [];
+function parseHoldingsFromParagraphs(result: VisionAnalysisResult, optionsOnly: boolean): DraftRow[] {
+  const candidates =
+    result.paragraphs?.map((paragraph) => buildDraftRowFromParagraph(paragraph, optionsOnly)) ?? [];
   return candidates.filter((candidate): candidate is DraftRow => candidate !== null);
 }
 
@@ -398,13 +463,29 @@ function collectContextLines(lines: string[], startIndex: number): { source: str
       pointer += 1;
       break;
     }
-    if (pointer !== startIndex && normalizeTicker(line)) {
+    if (pointer !== startIndex && (normalizeTicker(line) || parseOptionContract(line))) {
       break;
     }
     context.push(line);
     pointer += 1;
   }
   return { source: context.join(' '), sliceEnd: pointer };
+}
+
+function looksLikeOptionBlock(lines: string[]): boolean {
+  const joined = lines.join(' ');
+  const hasOptionHeader = /\bOptions\b/i.test(joined);
+  const hasRight = /\b(Call|Put)\b/i.test(joined);
+  const hasExpiration = /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(joined);
+  return hasOptionHeader || (hasRight && hasExpiration);
+}
+
+function extractOptionQuantity(lines: string[]): number | null {
+  const text = lines.join(' ').replace(/\s+/g, ' ');
+  const qtyMatch = text.match(/\b(\d+(?:\.\d+)?)\s+(buys?|sells?)\b/i);
+  const parsed = parseNumber(qtyMatch?.[1] ?? null);
+  if (parsed !== null && parsed > 0) return parsed;
+  return null;
 }
 
 function extractSharesFromLines(lines: string[]): number | null {
@@ -439,6 +520,19 @@ function extractCurrencyValue(lines: string[]): number | null {
   return null;
 }
 
+function extractOptionMarketValue(lines: string[], strike: number | null): number | null {
+  for (const line of lines) {
+    if (!hasCurrencySymbol(line)) continue;
+    const match = line.match(/(?:\$)\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*[kmb]?/i);
+    const parsed = parseNumber(match?.[0] ?? null);
+    if (parsed === null) continue;
+    const isStrike = strike !== null && Math.abs(parsed - strike) < 1e-6;
+    if (isStrike && /\b(Call|Put)\b/i.test(line)) continue;
+    return parsed;
+  }
+  return null;
+}
+
 function extractSecondaryValue(lines: string[], sharesValue: number | null): number | null {
   const candidates: number[] = [];
   lines.forEach((line) => {
@@ -461,34 +555,46 @@ function parseHoldingsFromPlainText(text: string): DraftRow[] {
 
   const results: DraftRow[] = [];
   let index = 0;
+  const inOptionsView = looksLikeOptionBlock(lines.slice(0, 12));
   while (index < lines.length) {
     const line = lines[index];
     const option = parseOptionContract(line);
     if (option) {
       const { source, sliceEnd } = collectContextLines(lines, index);
       const contextLines = lines.slice(index, sliceEnd);
-      const shares = option.quantity ?? extractSharesFromLines(contextLines);
-      const currencyValue = extractCurrencyValue(contextLines);
-      const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0);
+      const resolvedExpiration = option.expiration ?? findExpiration(source);
+      const quantityFromContext = extractOptionQuantity(contextLines);
+      const shares = option.quantity ?? quantityFromContext ?? extractSharesFromLines(contextLines);
+      const contracts = shares !== null ? Math.abs(shares) : null;
+      const buySell = option.buySell ?? resolveOptionSide(source, shares);
+      const currencyValue = extractOptionMarketValue(contextLines, option.strike);
+      const confidenceBase = 0.5 + (currencyValue ? 0.15 : 0) + (contracts ? 0.1 : 0);
 
-    results.push({
-      id: createDraftId(),
-      ticker: option.ticker,
-      shares,
-      assetType: 'option',
+      results.push({
+        id: createDraftId(),
+        ticker: option.ticker,
+        shares: contracts,
+        contracts,
+        buySell,
+        assetType: 'option',
         optionStrike: option.strike,
-        optionExpiration: option.expiration,
+        optionExpiration: resolvedExpiration ?? null,
         optionRight: option.right,
         costBasis: currencyValue ?? null,
-      costBasisSource: currencyValue ? 'ocr' : undefined,
-      marketValue: currencyValue ?? null,
-      confidence: Math.min(1, confidenceBase),
-      source,
-      parseMode: 'heuristic',
-      selected: true,
-    });
+        costBasisSource: currencyValue ? 'ocr' : undefined,
+        marketValue: currencyValue ?? null,
+        confidence: Math.min(1, confidenceBase),
+        source,
+        parseMode: 'heuristic',
+        selected: true,
+      });
 
       index = sliceEnd;
+      continue;
+    }
+
+    if (inOptionsView) {
+      index += 1;
       continue;
     }
 
@@ -658,10 +764,17 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
     return current;
   };
 
+  const resolvedAssetType =
+    existing.assetType === 'option' && incoming.assetType === 'equity'
+      ? 'option'
+      : incoming.assetType ?? existing.assetType;
+
   map.set(incoming.ticker, {
     ...existing,
     shares: chooseValue(existing.shares, incoming.shares),
-    assetType: incoming.assetType ?? existing.assetType,
+    contracts: chooseValue(existing.contracts, incoming.contracts),
+    buySell: incoming.buySell ?? existing.buySell ?? null,
+    assetType: resolvedAssetType,
     optionStrike: chooseValue(existing.optionStrike, incoming.optionStrike),
     optionExpiration: incoming.optionExpiration ?? existing.optionExpiration ?? null,
     optionRight: incoming.optionRight ?? existing.optionRight ?? null,
@@ -679,7 +792,17 @@ function mergeDraftRows(map: Map<string, DraftRow>, incoming: DraftRow) {
 
 export async function parseHoldingsFromVision(result: VisionAnalysisResult): Promise<DraftRow[]> {
   const useGeminiOnly = /^true|1|yes|on$/i.test(process.env.OCR_USE_GEMINI_ONLY ?? '');
-  const geminiDrafts = parseHoldingsFromGemini(result.gemini);
+  const rawGeminiDrafts = parseHoldingsFromGemini(result.gemini);
+  const lines = (result.text ?? '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length);
+  const optionsOnly = looksLikeOptionBlock(lines.slice(0, 12));
+  const geminiDrafts = optionsOnly
+    ? rawGeminiDrafts.filter(
+        (draft) => draft.assetType === 'option' || draft.optionRight || draft.optionStrike || draft.optionExpiration
+      )
+    : rawGeminiDrafts;
   const geminiCount = geminiDrafts.length;
   const geminiAvgConfidence =
     geminiCount > 0
@@ -710,7 +833,7 @@ export async function parseHoldingsFromVision(result: VisionAnalysisResult): Pro
     viewType === 'single'
       ? await parseSingleStockDetail(result)
       : [
-          ...parseHoldingsFromParagraphs(result),
+          ...parseHoldingsFromParagraphs(result, optionsOnly),
           ...parseHoldingsFromPlainText(result.text ?? ''),
         ];
 

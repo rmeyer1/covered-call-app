@@ -120,6 +120,8 @@ export interface DraftHolding {
   id: string;
   ticker: string;
   shares: number | null;
+  contracts?: number | null;
+  buySell?: 'buy' | 'sell' | null;
   assetType?: PortfolioAssetType;
   optionStrike?: number | null;
   optionExpiration?: string | null;
@@ -143,6 +145,8 @@ export interface RemoteDraft {
   id?: string;
   ticker?: string | null;
   share_qty?: number | string | null;
+  contract_qty?: number | string | null;
+  buy_sell?: 'buy' | 'sell' | null;
   asset_type?: PortfolioAssetType | null;
   option_strike?: number | string | null;
   option_expiration?: string | null;
@@ -213,6 +217,48 @@ export interface PortfolioHoldingsResponse {
     totalCost?: number | null;
     totalGain?: number | null;
   };
+}
+
+export interface PortfolioOptionRow {
+  id: string;
+  user_id: string;
+  ticker: string;
+  share_qty: number;
+  option_strike: number | null;
+  option_expiration: string | null;
+  option_right: 'call' | 'put' | null;
+  buy_sell?: 'buy' | 'sell' | null;
+  cost_basis?: number | null;
+  market_value?: number | null;
+  confidence?: number | null;
+  source?: string | null;
+  upload_id?: string | null;
+  draft_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PortfolioOption {
+  id: string;
+  userId: string;
+  ticker: string;
+  shareQty: number;
+  optionStrike: number | null;
+  optionExpiration: string | null;
+  optionRight: 'call' | 'put' | null;
+  buySell?: 'buy' | 'sell' | null;
+  costBasis?: number | null;
+  marketValue?: number | null;
+  confidence?: number | null;
+  source?: string | null;
+  uploadId?: string | null;
+  draftId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PortfolioOptionsResponse {
+  options: PortfolioOptionRow[];
 }
 
 export type VisionTokenBoundingBox =

@@ -7,6 +7,8 @@ interface DraftPayload {
   id?: string | null;
   ticker?: string | null;
   shares?: number | string | null;
+  contracts?: number | string | null;
+  buySell?: 'buy' | 'sell' | null;
   assetType?: string | null;
   type?: string | null;
   optionStrike?: number | string | null;
@@ -24,6 +26,8 @@ interface DraftInsert {
   id?: string;
   ticker: string;
   share_qty: number | null;
+  contract_qty?: number | null;
+  buy_sell?: 'buy' | 'sell' | null;
   asset_type?: string | null;
   option_strike?: number | null;
   option_expiration?: string | null;
@@ -61,12 +65,18 @@ function toDraftInsert(draft: DraftPayload, userId: string): DraftInsert | null 
         ? draft.assetType
         : null;
   const optionRight = typeof draft.optionRight === 'string' ? draft.optionRight.toLowerCase() : null;
+  const buySell = typeof draft.buySell === 'string' ? draft.buySell.toLowerCase() : null;
+  const contractQty = normalizeNumber(draft.contracts);
+  const shareQty = normalizeNumber(draft.shares);
+  const assetType = rawType === 'option' ? 'option' : 'equity';
 
   return {
     id,
     ticker,
-    share_qty: normalizeNumber(draft.shares),
-    asset_type: rawType === 'option' ? 'option' : 'equity',
+    share_qty: assetType === 'option' ? contractQty ?? shareQty : shareQty,
+    contract_qty: assetType === 'option' ? contractQty ?? shareQty : null,
+    buy_sell: buySell === 'sell' || buySell === 'buy' ? buySell : null,
+    asset_type: assetType,
     option_strike: normalizeNumber(draft.optionStrike),
     option_expiration: typeof draft.optionExpiration === 'string' ? draft.optionExpiration : null,
     option_right: optionRight === 'put' || optionRight === 'call' ? optionRight : null,

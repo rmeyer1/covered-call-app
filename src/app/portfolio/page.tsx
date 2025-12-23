@@ -45,15 +45,25 @@ export default function PortfolioPage() {
   const [tipsVisible, setTipsVisible] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [draftInputs, setDraftInputs] = useState<
-    Record<string, Partial<Record<'ticker' | 'shares' | 'costBasis' | 'marketValue', string>>>
+    Record<
+      string,
+      Partial<
+        Record<
+          'ticker' | 'shares' | 'contracts' | 'costBasis' | 'marketValue' | 'optionStrike' | 'optionExpiration',
+          string
+        >
+      >
+    >
   >({});
   const [userId, setUserId] = useState<string | null>(null);
   const [mode, setMode] = useState<ViewMode>('loading');
   const [savingHoldings, setSavingHoldings] = useState(false);
   const [saveHoldingsError, setSaveHoldingsError] = useState<string | null>(null);
   const [deletingHoldingId, setDeletingHoldingId] = useState<string | null>(null);
+  const [deletingOptionId, setDeletingOptionId] = useState<string | null>(null);
   const {
     holdings,
+    options,
     stats: portfolioStats,
     loading: holdingsLoading,
     error: holdingsError,
@@ -170,6 +180,8 @@ export default function PortfolioPage() {
   }, [drafts, userId, mode]);
 
   const activeDrafts = mergeAccounts ? mergedDrafts : drafts;
+  const equityDrafts = activeDrafts.filter((draft) => (draft.assetType ?? 'equity') !== 'option');
+  const optionDrafts = activeDrafts.filter((draft) => (draft.assetType ?? 'equity') === 'option');
 
   const selectedCount = useMemo(
     () => (mode === 'upload' ? activeDrafts.filter((draft) => draft.selected).length : 0),
@@ -292,11 +304,24 @@ export default function PortfolioPage() {
   };
 
   const handleDraftChange = (id: string, field: keyof DraftHolding, value: string) => {
-    const toDraftValue = (draft: DraftRow) => ({
-      ...draft,
-      [field]: field === 'ticker' ? value.toUpperCase() : parseNumber(value),
-      costBasisSource: field === 'costBasis' ? 'manual' : draft.costBasisSource,
-    });
+    const numericValue = parseNumber(value);
+    const toDraftValue = (draft: DraftRow) => {
+      if (field === 'ticker') {
+        return { ...draft, ticker: value.toUpperCase() };
+      }
+      if (field === 'contracts') {
+        return {
+          ...draft,
+          contracts: numericValue,
+          shares: draft.assetType === 'option' ? numericValue : draft.shares,
+        };
+      }
+      return {
+        ...draft,
+        [field]: numericValue,
+        costBasisSource: field === 'costBasis' ? 'manual' : draft.costBasisSource,
+      };
+    };
 
     if (mergeAccounts) {
       const groupKey = findGroupKeyForDraft(id);
@@ -304,7 +329,7 @@ export default function PortfolioPage() {
       applyDraftUpdate((list) => {
         const group = list.filter((draft) => draftGroupingKey(draft) === groupKey);
         if (!group.length) return list;
-        if (field === 'shares') {
+        if (field === 'shares' || field === 'contracts') {
           const nextShares = parseNumber(value);
           const currentTotal = group.reduce((sum, draft) => sum + (draft.shares ?? 0), 0);
           const divisor = group.length || 1;
@@ -319,6 +344,7 @@ export default function PortfolioPage() {
             return {
               ...draft,
               shares: distributed,
+              contracts: field === 'contracts' ? distributed : draft.contracts,
             };
           });
         }
@@ -356,7 +382,7 @@ export default function PortfolioPage() {
 
   const setDraftInputValue = (
     id: string,
-    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue',
+    field: 'ticker' | 'shares' | 'contracts' | 'costBasis' | 'marketValue' | 'optionStrike' | 'optionExpiration',
     value: string
   ) => {
     setDraftInputs((prev) => ({
@@ -370,7 +396,7 @@ export default function PortfolioPage() {
 
   const clearDraftInputValue = (
     id: string,
-    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
+    field: 'ticker' | 'shares' | 'contracts' | 'costBasis' | 'marketValue' | 'optionStrike' | 'optionExpiration'
   ) => {
     setDraftInputs((prev) => {
       const current = prev[id];
@@ -388,7 +414,7 @@ export default function PortfolioPage() {
 
   const getDraftInputValue = (
     draft: DraftRow,
-    field: 'ticker' | 'shares' | 'costBasis' | 'marketValue'
+    field: 'ticker' | 'shares' | 'contracts' | 'costBasis' | 'marketValue' | 'optionStrike' | 'optionExpiration'
   ): string => {
     const value = draftInputs[draft.id]?.[field];
     if (value !== undefined) return value;
@@ -423,6 +449,30 @@ export default function PortfolioPage() {
         {label}
       </span>
     );
+  };
+
+  const handleDraftStringChange = (
+    id: string,
+    field: 'optionExpiration' | 'optionRight' | 'buySell',
+    value: string
+  ) => {
+    const normalized =
+      field === 'optionRight'
+        ? value.toLowerCase()
+        : field === 'buySell'
+          ? value.toLowerCase()
+          : value;
+    if (mergeAccounts) {
+      const groupKey = findGroupKeyForDraft(id);
+      if (!groupKey) return;
+      applyDraftUpdate((list) =>
+        list.map((draft) =>
+          draftGroupingKey(draft) === groupKey ? { ...draft, [field]: normalized } : draft
+        )
+      );
+      return;
+    }
+    applyDraftUpdate((list) => list.map((draft) => (draft.id === id ? { ...draft, [field]: normalized } : draft)));
   };
 
   const handleFeedback = (ok: boolean) => {
@@ -474,7 +524,10 @@ export default function PortfolioPage() {
       );
       const isUuid = (value?: string | null) =>
         Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
-      const payload = readyDrafts.map((draft) => {
+      const equityDrafts = readyDrafts.filter((draft) => (draft.assetType ?? 'equity') !== 'option');
+      const optionDrafts = readyDrafts.filter((draft) => (draft.assetType ?? 'equity') === 'option');
+
+      const holdingsPayload = equityDrafts.map((draft) => {
         const existing = historyByTicker.get(draft.ticker.toUpperCase());
         const costBasis = draft.costBasis ?? existing?.costBasis ?? null;
         const brokerValue = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
@@ -499,24 +552,60 @@ export default function PortfolioPage() {
         };
       });
 
-      const res = await fetch('/api/portfolio/holdings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
-        body: JSON.stringify({ holdings: payload, replace: false }),
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        let message = text;
-        try {
-          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
-          message = parsed?.error ?? message;
-        } catch {
-          // ignore JSON parse errors; fallback to raw text
+      if (holdingsPayload.length) {
+        const res = await fetch('/api/portfolio/holdings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ holdings: holdingsPayload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save holdings (${res.status})`);
         }
-        throw new Error(message || `Failed to save holdings (${res.status})`);
       }
 
-      mergeStocksFromDrafts(readyDrafts);
+      if (optionDrafts.length) {
+        const optionsPayload = optionDrafts.map((draft) => ({
+          id: isUuid(draft.id) ? draft.id : undefined,
+          ticker: draft.ticker,
+          shareQty: draft.contracts ?? draft.shares,
+          optionStrike: draft.optionStrike ?? null,
+          optionExpiration: draft.optionExpiration ?? null,
+          optionRight: draft.optionRight ?? null,
+          buySell: draft.buySell ?? null,
+          costBasis: draft.costBasis ?? null,
+          marketValue: draft.marketValue ?? null,
+          confidence: draft.confidence ?? null,
+          source: draft.broker ?? detectBrokerage(draft.source)?.value ?? null,
+          draftId: isUuid(draft.id) ? draft.id : null,
+          uploadId: draft.uploadId ?? null,
+        }));
+        const res = await fetch('/api/portfolio/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ options: optionsPayload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save options (${res.status})`);
+        }
+      }
+
+      mergeStocksFromDrafts(equityDrafts);
       if (mergeAccounts) {
         const readyKeys = new Set(readyDrafts.map((draft) => draftGroupingKey(draft)));
         const keptRaw = drafts.filter((draft) => !readyKeys.has(draftGroupingKey(draft)));
@@ -570,6 +659,36 @@ export default function PortfolioPage() {
     }
   };
 
+  const handleDeleteOption = async (id: string) => {
+    if (!userId) return;
+    setDeletingOptionId(id);
+    setError(null);
+    try {
+      const res = await fetch('/api/portfolio/options', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to delete option (${res.status})`);
+      }
+      await refreshHoldings();
+    } catch (err) {
+      console.error('Failed to delete option', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete option');
+    } finally {
+      setDeletingOptionId(null);
+    }
+  };
+
   if (mode === 'loading') {
     return (
       <div className="bg-gray-100 dark:bg-gray-900 min-h-screen flex items-center justify-center text-gray-600 dark:text-gray-300">
@@ -583,6 +702,7 @@ export default function PortfolioPage() {
       {mode === 'dashboard' ? (
         <PortfolioDashboard
           holdings={holdings}
+          options={options}
           stats={portfolioStats}
           loading={holdingsLoading}
           error={holdingsError}
@@ -590,6 +710,8 @@ export default function PortfolioPage() {
           onRefresh={handleRefreshHoldings}
           onDeleteHolding={handleDeleteHolding}
           deletingId={deletingHoldingId}
+          onDeleteOption={handleDeleteOption}
+          deletingOptionId={deletingOptionId}
         />
       ) : (
         <main className="max-w-5xl mx-auto px-3 sm:px-6 py-6 sm:py-10">
@@ -747,32 +869,33 @@ export default function PortfolioPage() {
                 {feedbackMessage && <p className="text-xs text-gray-600 dark:text-gray-300">{feedbackMessage}</p>}
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full text-xs sm:text-sm bg-white dark:bg-gray-800 rounded-md shadow">
-                  <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-                    <tr>
-                      <th className="p-3 text-left">Use</th>
-                      <th className="p-3 text-left">Ticker</th>
-                      <th className="p-3 text-left">Type</th>
-                      <th className="p-3 text-left">Shares</th>
-                      <th className="p-3 text-left">Cost Basis</th>
-                      <th className="p-3 text-left">Market Value</th>
-                      <th className="p-3 text-left">Confidence</th>
-                      <th className="p-3 text-left">Source</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {activeDrafts.map((draft) => {
-                      const historyHolding = historyMap.get(draft.ticker.toUpperCase());
-                      const resolvedCostBasis = draft.costBasis ?? historyHolding?.costBasis ?? null;
-                      const costBasisMissing = resolvedCostBasis === null || resolvedCostBasis === undefined;
-                      const lastKnownCost = historyHolding?.costBasis ?? undefined;
-                      const costBasisPlaceholder =
-                        draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
-                      const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                {equityDrafts.length > 0 && (
+                  <table className="min-w-full text-xs sm:text-sm bg-white dark:bg-gray-800 rounded-md shadow">
+                    <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                      <tr>
+                        <th className="p-3 text-left">Use</th>
+                        <th className="p-3 text-left">Ticker</th>
+                        <th className="p-3 text-left">Type</th>
+                        <th className="p-3 text-left">Shares</th>
+                        <th className="p-3 text-left">Cost Basis</th>
+                        <th className="p-3 text-left">Market Value</th>
+                        <th className="p-3 text-left">Confidence</th>
+                        <th className="p-3 text-left">Source</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {equityDrafts.map((draft) => {
+                        const historyHolding = historyMap.get(draft.ticker.toUpperCase());
+                        const resolvedCostBasis = draft.costBasis ?? historyHolding?.costBasis ?? null;
+                        const costBasisMissing = resolvedCostBasis === null || resolvedCostBasis === undefined;
+                        const lastKnownCost = historyHolding?.costBasis ?? undefined;
+                        const costBasisPlaceholder =
+                          draft.costBasisSource === 'history' || costBasisMissing ? lastKnownCost : undefined;
+                        const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
 
-                      return (
-                        <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
+                        return (
+                          <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
                           <td className="p-3">
                             <input
                               type="checkbox"
@@ -905,6 +1028,176 @@ export default function PortfolioPage() {
                     })}
                   </tbody>
                 </table>
+                )}
+                {optionDrafts.length > 0 && (
+                  <table className="mt-6 min-w-full text-xs sm:text-sm bg-white dark:bg-gray-800 rounded-md shadow">
+                    <thead className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                      <tr>
+                        <th className="p-3 text-left">Use</th>
+                        <th className="p-3 text-left">Ticker</th>
+                        <th className="p-3 text-left">Type</th>
+                        <th className="p-3 text-left">Contracts</th>
+                        <th className="p-3 text-left">Buy/Sell</th>
+                        <th className="p-3 text-left">Right</th>
+                        <th className="p-3 text-left">Strike</th>
+                        <th className="p-3 text-left">Expiration</th>
+                        <th className="p-3 text-left">Market Value</th>
+                        <th className="p-3 text-left">Confidence</th>
+                        <th className="p-3 text-left">Source</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {optionDrafts.map((draft) => {
+                        const detectedBroker = draft.broker ?? detectBrokerage(draft.source)?.value ?? null;
+                        return (
+                          <tr key={draft.id} className="border-t border-gray-200 dark:border-gray-700">
+                            <td className="p-3">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={draft.selected}
+                                onChange={() => toggleSelected(draft.id)}
+                              />
+                            </td>
+                            <td className="p-3">
+                              <input
+                                value={getDraftInputValue(draft, 'ticker')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'ticker', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.ticker ?? '';
+                                  handleDraftChange(draft.id, 'ticker', value);
+                                  clearDraftInputValue(draft.id, 'ticker');
+                                }}
+                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                                Option
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <input
+                                value={getDraftInputValue(draft, 'contracts')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'contracts', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.contracts ?? '';
+                                  handleDraftChange(draft.id, 'contracts', value);
+                                  clearDraftInputValue(draft.id, 'contracts');
+                                }}
+                                className="w-20 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <select
+                                value={draft.buySell ?? ''}
+                                onChange={(e) => handleDraftStringChange(draft.id, 'buySell', e.target.value)}
+                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+                              >
+                                <option value="">—</option>
+                                <option value="buy">Buy</option>
+                                <option value="sell">Sell</option>
+                              </select>
+                            </td>
+                            <td className="p-3">
+                              <select
+                                value={draft.optionRight ?? ''}
+                                onChange={(e) => handleDraftStringChange(draft.id, 'optionRight', e.target.value)}
+                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+                              >
+                                <option value="">—</option>
+                                <option value="call">Call</option>
+                                <option value="put">Put</option>
+                              </select>
+                            </td>
+                            <td className="p-3">
+                              <input
+                                value={getDraftInputValue(draft, 'optionStrike')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'optionStrike', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.optionStrike ?? '';
+                                  handleDraftChange(draft.id, 'optionStrike', value);
+                                  clearDraftInputValue(draft.id, 'optionStrike');
+                                }}
+                                className="w-24 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <input
+                                value={getDraftInputValue(draft, 'optionExpiration')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'optionExpiration', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.optionExpiration ?? '';
+                                  handleDraftStringChange(draft.id, 'optionExpiration', value);
+                                  clearDraftInputValue(draft.id, 'optionExpiration');
+                                }}
+                                className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">
+                              <input
+                                value={getDraftInputValue(draft, 'marketValue')}
+                                onChange={(e) => setDraftInputValue(draft.id, 'marketValue', e.target.value)}
+                                onBlur={() => {
+                                  const value = draftInputs[draft.id]?.marketValue ?? '';
+                                  handleDraftChange(draft.id, 'marketValue', value);
+                                  clearDraftInputValue(draft.id, 'marketValue');
+                                }}
+                                className="w-28 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                              />
+                            </td>
+                            <td className="p-3">{renderConfidenceBadge(draft.confidence)}</td>
+                            <td className="p-3">
+                              <div className="flex flex-col gap-2">
+                                {renderBrokerBadge(detectedBroker)}
+                                <select
+                                  value={detectedBroker ?? ''}
+                                  onChange={(e) => {
+                                    const next = e.target.value || null;
+                                    if (mergeAccounts) {
+                                      const groupKey = findGroupKeyForDraft(draft.id);
+                                      if (!groupKey) return;
+                                      applyDraftUpdate((list) =>
+                                        list.map((item) =>
+                                          draftGroupingKey(item) === groupKey ? { ...item, broker: next } : item
+                                        )
+                                      );
+                                    } else {
+                                      applyDraftUpdate((list) =>
+                                        list.map((item) => (item.id === draft.id ? { ...item, broker: next } : item))
+                                      );
+                                    }
+                                  }}
+                                  className="w-40 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+                                >
+                                  <option value="">Unknown</option>
+                                  {BROKERAGE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                {draft.uploadName && (
+                                  <span className="text-[11px] text-gray-400">{draft.uploadName}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <button
+                                onClick={() => removeDraft(draft.id)}
+                                className="text-red-500 hover:text-red-600"
+                                aria-label="Remove row"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </section>
           )}

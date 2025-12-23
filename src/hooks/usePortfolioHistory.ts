@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { PortfolioHolding, PortfolioHoldingsResponse } from '@/types';
-import { fetchHoldings } from '@/lib/portfolio-drafts';
+import type { PortfolioHolding, PortfolioHoldingsResponse, PortfolioOption } from '@/types';
+import { fetchHoldings, fetchOptions } from '@/lib/portfolio-drafts';
 
 interface UsePortfolioHistoryResult {
   holdings: PortfolioHolding[];
+  options: PortfolioOption[];
   stats?: PortfolioHoldingsResponse['stats'];
   loading: boolean;
   error: string | null;
@@ -13,6 +14,7 @@ interface UsePortfolioHistoryResult {
 
 export function usePortfolioHistory(userId: string | null): UsePortfolioHistoryResult {
   const [holdings, setHoldings] = useState<PortfolioHolding[]>([]);
+  const [options, setOptions] = useState<PortfolioOption[]>([]);
   const [stats, setStats] = useState<PortfolioHoldingsResponse['stats']>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,8 +26,10 @@ export function usePortfolioHistory(userId: string | null): UsePortfolioHistoryR
       setError(null);
       try {
         const { holdings: loadedHoldings, stats: loadedStats } = await fetchHoldings(userId);
+        const loadedOptions = await fetchOptions(userId);
         setHoldings(loadedHoldings);
         setStats(loadedStats);
+        setOptions(loadedOptions);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load holdings';
         setError(message);
@@ -46,5 +50,5 @@ export function usePortfolioHistory(userId: string | null): UsePortfolioHistoryR
     [holdings]
   );
 
-  return { holdings, stats, loading, error, refresh, historyMap };
+  return { holdings, options, stats, loading, error, refresh, historyMap };
 }
