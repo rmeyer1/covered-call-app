@@ -542,22 +542,46 @@ export default function PortfolioPage() {
       }
       const costBasis = parseNumber(manualFields.costBasis);
       const marketValue = parseNumber(manualFields.marketValue);
-      const draft: DraftRow = {
-        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        ticker,
-        shares,
-        costBasis: costBasis ?? null,
-        costBasisSource: costBasis !== null && costBasis !== undefined ? 'manual' : undefined,
-        marketValue: marketValue ?? null,
-        confidence: 1,
-        source: 'manual',
-        parseMode: 'manual',
-        selected: true,
-        uploadName: 'Manual entry',
+      const saveEquity = async () => {
+        if (!userId) {
+          setManualError('Missing user session. Please refresh and try again.');
+          return;
+        }
+        const payload = [
+          {
+            ticker,
+            shareQty: shares,
+            assetType: 'equity',
+            costBasis: costBasis ?? null,
+            marketValue: marketValue ?? null,
+            confidence: 1,
+            source: 'manual',
+          },
+        ];
+        const res = await fetch('/api/portfolio/holdings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+          body: JSON.stringify({ holdings: payload, replace: false }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let message = text;
+          try {
+            const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+            message = parsed?.error ?? message;
+          } catch {
+            // ignore JSON parse errors; fallback to raw text
+          }
+          throw new Error(message || `Failed to save holding (${res.status})`);
+        }
+        await refreshHoldings();
+        setManualOpen(false);
+        resetManualForm();
       };
-      applyDraftUpdate((prev) => [...prev, draft]);
-      setManualOpen(false);
-      resetManualForm();
+      void saveEquity().catch((err) => {
+        console.error('Failed to save manual holding', err);
+        setManualError(err instanceof Error ? err.message : 'Failed to save holding');
+      });
       return;
     }
 
@@ -591,28 +615,49 @@ export default function PortfolioPage() {
     }
     const costBasis = parseNumber(manualFields.costBasis);
     const marketValue = parseNumber(manualFields.marketValue);
-    const draft: DraftRow = {
-      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      ticker,
-      shares: contracts,
-      contracts,
-      buySell,
-      assetType: 'option',
-      optionStrike,
-      optionExpiration: manualFields.optionExpiration.trim(),
-      optionRight,
-      costBasis: costBasis ?? null,
-      costBasisSource: costBasis !== null && costBasis !== undefined ? 'manual' : undefined,
-      marketValue: marketValue ?? null,
-      confidence: 1,
-      source: 'manual',
-      parseMode: 'manual',
-      selected: true,
-      uploadName: 'Manual entry',
+    const saveOption = async () => {
+      if (!userId) {
+        setManualError('Missing user session. Please refresh and try again.');
+        return;
+      }
+      const payload = [
+        {
+          ticker,
+          shareQty: contracts,
+          optionStrike,
+          optionExpiration: manualFields.optionExpiration.trim(),
+          optionRight,
+          buySell,
+          costBasis: costBasis ?? null,
+          marketValue: marketValue ?? null,
+          confidence: 1,
+          source: 'manual',
+        },
+      ];
+      const res = await fetch('/api/portfolio/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', [USER_HEADER_KEY]: userId },
+        body: JSON.stringify({ options: payload, replace: false }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let message = text;
+        try {
+          const parsed = text ? (JSON.parse(text) as { error?: string }) : null;
+          message = parsed?.error ?? message;
+        } catch {
+          // ignore JSON parse errors; fallback to raw text
+        }
+        throw new Error(message || `Failed to save option (${res.status})`);
+      }
+      await refreshHoldings();
+      setManualOpen(false);
+      resetManualForm();
     };
-    applyDraftUpdate((prev) => [...prev, draft]);
-    setManualOpen(false);
-    resetManualForm();
+    void saveOption().catch((err) => {
+      console.error('Failed to save manual option', err);
+      setManualError(err instanceof Error ? err.message : 'Failed to save option');
+    });
   };
 
   const handleCommit = async () => {
@@ -1198,7 +1243,7 @@ export default function PortfolioPage() {
                       onClick={handleSaveManualDraft}
                       className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-md"
                     >
-                      Save draft
+                      Save holding
                     </button>
                     <button
                       type="button"
