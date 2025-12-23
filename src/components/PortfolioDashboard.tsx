@@ -206,6 +206,55 @@ export default function PortfolioDashboard({
     });
   };
 
+  const getOptionInput = (
+    option: PortfolioOption,
+    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration'
+  ): string => {
+    const raw = optionInputs[option.id]?.[field];
+    if (raw !== undefined) return raw;
+    const fallback =
+      field === 'ticker'
+        ? option.ticker
+        : field === 'marketValue'
+          ? option.marketValue
+          : field === 'optionStrike'
+            ? option.optionStrike
+            : option.optionExpiration;
+    return fallback === null || fallback === undefined ? '' : String(fallback);
+  };
+
+  const setOptionInput = (
+    optionId: string,
+    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration',
+    value: string
+  ) => {
+    setOptionInputs((prev) => ({
+      ...prev,
+      [optionId]: {
+        ...prev[optionId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const clearOptionInput = (
+    optionId: string,
+    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration'
+  ) => {
+    setOptionInputs((prev) => {
+      const current = prev[optionId];
+      if (!current) return prev;
+      const { [field]: _removed, ...rest } = current;
+      const next = { ...prev };
+      if (Object.keys(rest).length === 0) {
+        delete next[optionId];
+      } else {
+        next[optionId] = rest;
+      }
+      return next;
+    });
+  };
+
   const hasHoldings = holdings.length > 0;
   const hasOptions = options.length > 0;
   const totals = stats ?? calculateStatsFromHoldings(holdings);
@@ -920,51 +969,3 @@ export default function PortfolioDashboard({
     </main>
   );
 }
-  const getOptionInput = (
-    option: PortfolioOption,
-    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration'
-  ): string => {
-    const raw = optionInputs[option.id]?.[field];
-    if (raw !== undefined) return raw;
-    const fallback =
-      field === 'ticker'
-        ? option.ticker
-        : field === 'marketValue'
-          ? option.marketValue
-          : field === 'optionStrike'
-            ? option.optionStrike
-            : option.optionExpiration;
-    return fallback === null || fallback === undefined ? '' : String(fallback);
-  };
-
-  const setOptionInput = (
-    optionId: string,
-    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration',
-    value: string
-  ) => {
-    setOptionInputs((prev) => ({
-      ...prev,
-      [optionId]: {
-        ...prev[optionId],
-        [field]: value,
-      },
-    }));
-  };
-
-  const clearOptionInput = (
-    optionId: string,
-    field: 'ticker' | 'marketValue' | 'optionStrike' | 'optionExpiration'
-  ) => {
-    setOptionInputs((prev) => {
-      const current = prev[optionId];
-      if (!current) return prev;
-      const { [field]: _removed, ...rest } = current;
-      const next = { ...prev };
-      if (Object.keys(rest).length === 0) {
-        delete next[optionId];
-      } else {
-        next[optionId] = rest;
-      }
-      return next;
-    });
-  };
