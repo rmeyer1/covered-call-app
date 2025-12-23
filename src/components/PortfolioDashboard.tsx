@@ -285,9 +285,10 @@ export default function PortfolioDashboard({
                       const market = option.marketValue ?? null;
                       const contracts = option.shareQty ?? 0;
                       const contractMultiplier = 100;
+                      const direction = option.buySell === 'sell' ? -1 : 1;
                       const pnl =
                         cost !== null && market !== null
-                          ? (market - cost) * contracts * contractMultiplier
+                          ? (market - cost) * contracts * contractMultiplier * direction
                           : null;
                       const totalCost =
                         cost !== null ? cost * contracts * contractMultiplier : null;
