@@ -1029,6 +1029,166 @@ export default function PortfolioPage() {
             )}
           </section>
 
+          {manualOpen && (
+            <section className="mb-8 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Manual entry</span>
+                <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setManualType('equity')}
+                    className={`px-3 py-1.5 text-xs font-semibold ${
+                      manualType === 'equity'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    Equity
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManualType('option')}
+                    className={`px-3 py-1.5 text-xs font-semibold ${
+                      manualType === 'option'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    Option
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="text-xs text-gray-600 dark:text-gray-300">
+                  Ticker
+                  <input
+                    value={manualFields.ticker}
+                    onChange={(e) => setManualFields((prev) => ({ ...prev, ticker: e.target.value }))}
+                    className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                  />
+                </label>
+                {manualType === 'equity' ? (
+                  <>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Shares
+                      <input
+                        value={manualFields.shares}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, shares: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Cost Basis
+                      <input
+                        value={manualFields.costBasis}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Market Value
+                      <input
+                        value={manualFields.marketValue}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Contracts
+                      <input
+                        value={manualFields.contracts}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, contracts: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Buy/Sell
+                      <select
+                        value={manualFields.buySell}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, buySell: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="buy">Buy</option>
+                        <option value="sell">Sell</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Right
+                      <select
+                        value={manualFields.optionRight}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionRight: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="call">Call</option>
+                        <option value="put">Put</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Strike
+                      <input
+                        value={manualFields.optionStrike}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionStrike: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Expiration
+                      <input
+                        value={manualFields.optionExpiration}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, optionExpiration: e.target.value }))}
+                        placeholder="1/17/2026"
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Cost Basis
+                      <input
+                        value={manualFields.costBasis}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                    <label className="text-xs text-gray-600 dark:text-gray-300">
+                      Market Value
+                      <input
+                        value={manualFields.marketValue}
+                        onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
+                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+              {manualError && (
+                <p className="mt-3 text-xs text-red-600">{manualError}</p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveManualDraft}
+                  className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-md"
+                >
+                  Save holding
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualOpen(false);
+                    resetManualForm();
+                  }}
+                  className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-semibold px-3 py-2 rounded-md"
+                >
+                  Cancel
+                </button>
+              </div>
+            </section>
+          )}
+
           {previews.length > 0 && (
             <section className="mb-8">
               <div className="flex items-center justify-between mb-3">
@@ -1108,165 +1268,6 @@ export default function PortfolioPage() {
                   </button>
                 </div>
               </div>
-              {manualOpen && (
-                <div className="mb-4 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                  <div className="flex flex-wrap items-center gap-3 mb-3">
-                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Manual entry</span>
-                    <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => setManualType('equity')}
-                        className={`px-3 py-1.5 text-xs font-semibold ${
-                          manualType === 'equity'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
-                        }`}
-                      >
-                        Equity
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setManualType('option')}
-                        className={`px-3 py-1.5 text-xs font-semibold ${
-                          manualType === 'option'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
-                        }`}
-                      >
-                        Option
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <label className="text-xs text-gray-600 dark:text-gray-300">
-                      Ticker
-                      <input
-                        value={manualFields.ticker}
-                        onChange={(e) => setManualFields((prev) => ({ ...prev, ticker: e.target.value }))}
-                        className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                      />
-                    </label>
-                    {manualType === 'equity' ? (
-                      <>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Shares
-                          <input
-                            value={manualFields.shares}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, shares: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Cost Basis
-                          <input
-                            value={manualFields.costBasis}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Market Value
-                          <input
-                            value={manualFields.marketValue}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                      </>
-                    ) : (
-                      <>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Contracts
-                          <input
-                            value={manualFields.contracts}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, contracts: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Buy/Sell
-                          <select
-                            value={manualFields.buySell}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, buySell: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          >
-                            <option value="">Select</option>
-                            <option value="buy">Buy</option>
-                            <option value="sell">Sell</option>
-                          </select>
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Right
-                          <select
-                            value={manualFields.optionRight}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionRight: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          >
-                            <option value="">Select</option>
-                            <option value="call">Call</option>
-                            <option value="put">Put</option>
-                          </select>
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Strike
-                          <input
-                            value={manualFields.optionStrike}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionStrike: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Expiration
-                          <input
-                            value={manualFields.optionExpiration}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, optionExpiration: e.target.value }))}
-                            placeholder="1/17/2026"
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Cost Basis
-                          <input
-                            value={manualFields.costBasis}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, costBasis: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-gray-600 dark:text-gray-300">
-                          Market Value
-                          <input
-                            value={manualFields.marketValue}
-                            onChange={(e) => setManualFields((prev) => ({ ...prev, marketValue: e.target.value }))}
-                            className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-sm"
-                          />
-                        </label>
-                      </>
-                    )}
-                  </div>
-                  {manualError && (
-                    <p className="mt-3 text-xs text-red-600">{manualError}</p>
-                  )}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSaveManualDraft}
-                      className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-md"
-                    >
-                      Save holding
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setManualOpen(false);
-                        resetManualForm();
-                      }}
-                      className="inline-flex items-center gap-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-semibold px-3 py-2 rounded-md"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
               {selectedCount > 0 && readyCount === 0 && (
                 <p className="mb-3 text-sm text-amber-600 dark:text-amber-400">
                   Add share counts for the selected rows to continue.
