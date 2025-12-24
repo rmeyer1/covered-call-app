@@ -51,11 +51,14 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
   const resolvedLatest = latestPrice ?? fallbackLatest;
   const resolvedPrev = previousClose ?? fallbackPrev;
   const changeData = calcChange(resolvedLatest, resolvedPrev);
-  const sparkline = sortedBars
+  let sparkline = sortedBars
     .slice(0, 20)
     .reverse()
     .map((bar) => bar.c)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (sparkline.length < 2 && resolvedPrev !== null && resolvedLatest !== null) {
+    sparkline = [resolvedPrev, resolvedLatest];
+  }
 
   return {
     lastPrice: resolvedLatest ?? null,
