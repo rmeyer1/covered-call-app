@@ -389,6 +389,7 @@ export interface WatchlistItem {
   ticker: string;
   position: number;
   createdAt: string;
+  logoUrl?: string | null;
 }
 
 export interface WatchlistResponse {
