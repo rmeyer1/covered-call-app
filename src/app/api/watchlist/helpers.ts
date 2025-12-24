@@ -60,7 +60,8 @@ export function mapWatchlistRows(rows: WatchlistItemRow[]): WatchlistItem[] {
 
 export function mapWatchlistRowsWithLogo(
   rows: WatchlistItemRow[],
-  logoMap: Record<string, string | null>
+  logoMap: Record<string, string | null>,
+  nameMap: Record<string, string | null>
 ): WatchlistItem[] {
   return rows.map((row) => ({
     id: row.id,
@@ -68,6 +69,7 @@ export function mapWatchlistRowsWithLogo(
     position: row.position,
     createdAt: row.created_at,
     logoUrl: logoMap[row.ticker] ?? null,
+    name: nameMap[row.ticker] ?? null,
   }));
 }
 

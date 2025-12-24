@@ -39,14 +39,34 @@ function findRangePosition(current: number | null, bars: AlpacaBar[] | undefined
 function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar[]): StockDetailsSummary {
   const latestPrice = snapshot?.latestTrade?.p ?? snapshot?.minuteBar?.c ?? snapshot?.dailyBar?.c ?? null;
   const previousClose = snapshot?.prevDailyBar?.c ?? null;
-  const changeData = calcChange(latestPrice, previousClose);
+  const sortedBars = [...bars].sort((a, b) => {
+    const aTime = a.t ? new Date(a.t).getTime() : 0;
+    const bTime = b.t ? new Date(b.t).getTime() : 0;
+    return bTime - aTime;
+  });
+  const latestBar = sortedBars[0];
+  const prevBar = sortedBars[1];
+  const fallbackLatest = latestBar?.c ?? null;
+  const fallbackPrev = prevBar?.c ?? latestBar?.o ?? null;
+  const resolvedLatest = latestPrice ?? fallbackLatest;
+  const resolvedPrev = previousClose ?? fallbackPrev;
+  const changeData = calcChange(resolvedLatest, resolvedPrev);
+  let sparkline = sortedBars
+    .slice(0, 20)
+    .reverse()
+    .map((bar) => bar.c)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (sparkline.length < 2 && resolvedPrev !== null && resolvedLatest !== null) {
+    sparkline = [resolvedPrev, resolvedLatest];
+  }
 
   return {
-    lastPrice: latestPrice ?? null,
-    previousClose,
+    lastPrice: resolvedLatest ?? null,
+    previousClose: resolvedPrev ?? null,
     change: changeData.change,
     changePercent: changeData.changePercent,
     lastTradeTime: snapshot?.latestTrade?.t ?? null,
+    sparkline: sparkline.length ? sparkline : undefined,
     dayRange: snapshot?.dailyBar
       ? {
           low: snapshot.dailyBar.l,
@@ -164,4 +184,3 @@ export function buildStockDetails({
     isPartial: warnings.length > 0,
   };
 }
-
