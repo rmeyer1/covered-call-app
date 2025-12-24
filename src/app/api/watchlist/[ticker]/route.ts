@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseRestFetch } from '@/lib/supabase';
 import { fetchWatchlistRows, mapWatchlistRows, normalizeTicker, resolveUserId } from '../helpers';
 
-export async function DELETE(req: NextRequest, { params }: { params: { ticker?: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ ticker: string }> }) {
   try {
     const userId = resolveUserId(req);
     if (!userId) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
-    const ticker = normalizeTicker(params?.ticker);
+    const { ticker: rawTicker } = await params;
+    const ticker = normalizeTicker(rawTicker);
     if (!ticker) {
       return NextResponse.json({ error: 'ticker is required' }, { status: 400 });
     }

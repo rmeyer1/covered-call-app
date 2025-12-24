@@ -16,7 +16,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const rawTickers = Array.isArray(body?.tickers) ? body.tickers : [];
+    const rawTickers: unknown[] = Array.isArray(body?.tickers) ? body.tickers : [];
     const normalizedTickers = rawTickers
       .map((ticker) => normalizeTicker(ticker))
       .filter((ticker): ticker is string => Boolean(ticker));
