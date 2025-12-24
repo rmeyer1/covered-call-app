@@ -158,7 +158,12 @@ export default function StockDetailsPage() {
   const changeClass = (changePercent ?? 0) >= 0 ? 'text-emerald-600' : 'text-rose-600';
   const logoUrl = meta?.logoUrl ?? null;
 
-  const chartPoints = useMemo(() => summary?.sparkline ?? [], [summary?.sparkline]);
+  const chartPoints = useMemo(() => {
+    const ranges = summary?.sparklineRanges;
+    const rangePoints = ranges?.[activeRange];
+    if (rangePoints && rangePoints.length >= 2) return rangePoints;
+    return summary?.sparkline ?? [];
+  }, [summary?.sparkline, summary?.sparklineRanges, activeRange]);
 
   return (
     <main className="bg-gray-100 dark:bg-gray-900 min-h-screen text-gray-900 dark:text-white">

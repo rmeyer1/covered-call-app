@@ -36,14 +36,34 @@ function findRangePosition(current: number | null, bars: AlpacaBar[] | undefined
   };
 }
 
-function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar[]): StockDetailsSummary {
-  const latestPrice = snapshot?.latestTrade?.p ?? snapshot?.minuteBar?.c ?? snapshot?.dailyBar?.c ?? null;
-  const previousClose = snapshot?.prevDailyBar?.c ?? null;
-  const sortedBars = [...bars].sort((a, b) => {
+function sortBarsByTime(bars: AlpacaBar[], direction: 'asc' | 'desc' = 'desc') {
+  return [...bars].sort((a, b) => {
     const aTime = a.t ? new Date(a.t).getTime() : 0;
     const bTime = b.t ? new Date(b.t).getTime() : 0;
-    return bTime - aTime;
+    return direction === 'asc' ? aTime - bTime : bTime - aTime;
   });
+}
+
+function sliceLatestBars(bars: AlpacaBar[], count: number) {
+  if (!bars.length) return [];
+  const sorted = sortBarsByTime(bars, 'asc');
+  return sorted.slice(Math.max(0, sorted.length - count));
+}
+
+function buildSparkline(bars: AlpacaBar[]): number[] {
+  return bars
+    .map((bar) => bar.c)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+}
+
+function buildSummary(
+  snapshot: AlpacaStockSnapshot | undefined,
+  bars: AlpacaBar[],
+  intradayBars: AlpacaBar[]
+): StockDetailsSummary {
+  const latestPrice = snapshot?.latestTrade?.p ?? snapshot?.minuteBar?.c ?? snapshot?.dailyBar?.c ?? null;
+  const previousClose = snapshot?.prevDailyBar?.c ?? null;
+  const sortedBars = sortBarsByTime(bars, 'desc');
   const latestBar = sortedBars[0];
   const prevBar = sortedBars[1];
   const fallbackLatest = latestBar?.c ?? null;
@@ -51,11 +71,24 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
   const resolvedLatest = latestPrice ?? fallbackLatest;
   const resolvedPrev = previousClose ?? fallbackPrev;
   const changeData = calcChange(resolvedLatest, resolvedPrev);
-  let sparkline = sortedBars
-    .slice(0, 20)
-    .reverse()
-    .map((bar) => bar.c)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  const intradaySlice = sliceLatestBars(intradayBars, 390);
+  const sparklineRanges = {
+    '1D': buildSparkline(intradaySlice),
+    '1W': buildSparkline(sliceLatestBars(bars, 5)),
+    '1M': buildSparkline(sliceLatestBars(bars, 21)),
+    '3M': buildSparkline(sliceLatestBars(bars, 63)),
+    '1Y': buildSparkline(sliceLatestBars(bars, 252)),
+    '5Y': buildSparkline(sliceLatestBars(bars, 252 * 5)),
+  } as const;
+  const sparklineFallback =
+    sparklineRanges['1D']?.length >= 2
+      ? sparklineRanges['1D']
+      : sparklineRanges['1W']?.length
+        ? sparklineRanges['1W']
+        : sparklineRanges['1M']?.length
+          ? sparklineRanges['1M']
+          : [];
+  let sparkline = sparklineFallback;
   if (sparkline.length < 2 && resolvedPrev !== null && resolvedLatest !== null) {
     sparkline = [resolvedPrev, resolvedLatest];
   }
@@ -67,6 +100,7 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
     changePercent: changeData.changePercent,
     lastTradeTime: snapshot?.latestTrade?.t ?? null,
     sparkline: sparkline.length ? sparkline : undefined,
+    sparklineRanges,
     dayRange: snapshot?.dailyBar
       ? {
           low: snapshot.dailyBar.l,
@@ -94,7 +128,7 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
         }
       : undefined,
     marketStatus: determineMarketStatus(snapshot),
-    asOf: snapshot?.latestTrade?.t ?? new Date().toISOString(),
+    asOf: snapshot?.latestTrade?.t ?? latestBar?.t ?? new Date().toISOString(),
   };
 }
 
@@ -149,7 +183,9 @@ export interface BuildStockDetailsParams {
   snapshot?: AlpacaStockSnapshot;
   optionsSnapshot?: AlpacaOptionsSnapshot;
   bars?: AlpacaBar[];
+  intradayBars?: AlpacaBar[];
   news?: AlpacaNewsItem[];
+  warnings?: string[];
 }
 
 export function buildStockDetails({
@@ -157,13 +193,19 @@ export function buildStockDetails({
   snapshot,
   optionsSnapshot,
   bars = [],
+  intradayBars = [],
   news = [],
+  warnings = [],
 }: BuildStockDetailsParams): StockDetails {
-  const warnings: string[] = [];
-  if (!snapshot) warnings.push('Snapshot data unavailable');
-  warnings.push('Fundamentals unavailable');
+  const mergedWarnings = [...warnings];
+  if (!snapshot && !mergedWarnings.some((warning) => warning.toLowerCase().includes('snapshot'))) {
+    mergedWarnings.push('Snapshot data unavailable');
+  }
+  if (!mergedWarnings.some((warning) => warning.toLowerCase().includes('fundamentals'))) {
+    mergedWarnings.push('Fundamentals unavailable');
+  }
 
-  const summary = buildSummary(snapshot, bars);
+  const summary = buildSummary(snapshot, bars, intradayBars);
   const volatility = buildVolatility(optionsSnapshot);
   const fundamentalsSection = buildFundamentals();
   const mappedNews = mapNews(news);
@@ -180,7 +222,7 @@ export function buildStockDetails({
       volatility: optionsSnapshot ? 'alpaca.options.snapshots' : undefined,
       headlines: news.length ? 'alpaca.news' : undefined,
     },
-    warnings,
-    isPartial: warnings.length > 0,
+    warnings: mergedWarnings,
+    isPartial: mergedWarnings.length > 0,
   };
 }

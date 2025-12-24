@@ -310,6 +310,7 @@ export interface StockDetailsSummary {
   changePercent: number | null;
   lastTradeTime?: string | null;
   sparkline?: number[];
+  sparklineRanges?: Partial<Record<StockDetailsRange, number[]>>;
   dayRange?: StockValueRange;
   fiftyTwoWeekRange?: StockValueRangePosition;
   volume?: StockVolumeSnapshot;
@@ -317,6 +318,8 @@ export interface StockDetailsSummary {
   marketStatus?: 'pre' | 'open' | 'post' | 'closed';
   asOf: string;
 }
+
+export type StockDetailsRange = '1D' | '1W' | '1M' | '3M' | '1Y' | '5Y';
 
 export interface StockDetailsVolatility {
   impliedVolatility?: number | null;

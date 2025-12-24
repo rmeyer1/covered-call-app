@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDailyBars, getNews, getOptionsSnapshot, getStockSnapshot } from '@/lib/alpaca';
+import {
+  getDailyBars,
+  getMinuteBars,
+  getNews,
+  getOptionsSnapshots,
+  getStockSnapshot,
+  pickOptionsSnapshot,
+} from '@/lib/alpaca';
 import { buildStockDetails } from '@/lib/stocks/details';
 import { logError } from '@/lib/logger';
 
@@ -25,25 +32,24 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
 
   const warnings: string[] = [];
 
-  const [snapshot, optionsSnapshot, news, bars] = await Promise.all([
+  const [snapshot, optionsSnapshots, news, dailyBars, intradayBars] = await Promise.all([
     safeResolve(() => getStockSnapshot(ticker), 'snapshot', warnings),
-    safeResolve(() => getOptionsSnapshot(ticker), 'volatility', warnings),
+    safeResolve(() => getOptionsSnapshots(ticker), 'volatility', warnings),
     safeResolve(() => getNews(ticker, 5), 'news', warnings),
-    safeResolve(() => getDailyBars(ticker, 252), 'bars', warnings),
+    safeResolve(() => getDailyBars(ticker, 252 * 5), 'bars_daily', warnings),
+    safeResolve(() => getMinuteBars(ticker, '1Min', 390), 'bars_intraday', warnings),
   ]);
 
+  const optionsSnapshot = pickOptionsSnapshot(optionsSnapshots);
   const details = buildStockDetails({
     symbol: ticker,
     snapshot,
     optionsSnapshot,
     news: news ?? [],
-    bars: bars ?? [],
+    bars: dailyBars ?? [],
+    intradayBars: intradayBars ?? [],
+    warnings,
   });
-
-  if (warnings.length) {
-    details.warnings = [...(details.warnings ?? []), ...warnings];
-    details.isPartial = true;
-  }
 
   return NextResponse.json(details, {
     headers: {

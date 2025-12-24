@@ -97,6 +97,49 @@ export async function getDailyBars(symbol: string, limit = 252) {
   return bars.slice(0, limit);
 }
 
+export async function getMinuteBars(symbol: string, timeframe: '1Min' | '5Min' | '15Min' | '30Min' | '1Hour' = '1Min', limit = 390) {
+  const bars: AlpacaBar[] = [];
+  let nextPageToken: string | null | undefined;
+
+  do {
+    const params: Record<string, unknown> = {
+      timeframe,
+      limit,
+    };
+    if (nextPageToken) params.page_token = nextPageToken;
+
+    const data = await get<AlpacaBarResponse>(
+      `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/bars`,
+      params
+    );
+    if (Array.isArray(data?.bars)) {
+      bars.push(...data.bars);
+    }
+    nextPageToken = data?.next_page_token;
+  } while (nextPageToken && bars.length < limit);
+
+  return bars.slice(0, limit);
+}
+
+export async function getOptionsSnapshots(symbol: string): Promise<Record<string, AlpacaOptionsSnapshot> | undefined> {
+  try {
+    const response = await get<AlpacaOptionsSnapshotResponse>(
+      `${ALPACA_DATA_BASE_V1BETA1}/options/snapshots/${encodeURIComponent(symbol)}`
+    );
+    return response?.snapshots ?? undefined;
+  } catch (err) {
+    logAxiosError(err, 'alpaca.getOptionsSnapshots');
+    return undefined;
+  }
+}
+
+export function pickOptionsSnapshot(snapshots?: Record<string, AlpacaOptionsSnapshot>): AlpacaOptionsSnapshot | undefined {
+  if (!snapshots) return undefined;
+  const keys = Object.keys(snapshots);
+  if (!keys.length) return undefined;
+  return snapshots[keys[0]];
+}
+
 export async function getOptionsSnapshot(symbol: string): Promise<AlpacaOptionsSnapshot | undefined> {
   try {
     const response = await get<AlpacaOptionsSnapshotResponse>(
