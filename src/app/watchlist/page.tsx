@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Search, Sparkles, Plus, X, Loader2, GripVertical, Trash2, RefreshCw } from 'lucide-react';
 import { USER_HEADER_KEY, USER_ID_STORAGE_KEY } from '@/lib/portfolio-drafts';
 import type { StockDetailsSummary, WatchlistItem } from '@/types';
@@ -381,11 +382,11 @@ export default function WatchlistPage() {
                     }}
                     onDragEnd={() => setDraggingTicker(null)}
                   >
-                    <div className="flex items-center gap-3 sm:gap-4 flex-1">
-                      <button
-                        type="button"
-                        className="hidden sm:inline-flex items-center justify-center h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 hover:text-gray-600"
-                        aria-label="Drag to reorder"
+                  <div className="flex items-center gap-3 sm:gap-4 flex-1">
+                    <button
+                      type="button"
+                      className="hidden sm:inline-flex items-center justify-center h-8 w-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400 hover:text-gray-600"
+                      aria-label="Drag to reorder"
                         draggable
                         onDragStart={(e) => {
                           setDraggingTicker(item.ticker);
@@ -395,6 +396,10 @@ export default function WatchlistPage() {
                       >
                         <GripVertical size={16} />
                       </button>
+                    <Link
+                      href={`/stocks/${encodeURIComponent(item.ticker)}?from=watchlist`}
+                      className="flex items-center gap-3 sm:gap-4 flex-1 group-hover:text-blue-600"
+                    >
                       <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-semibold flex items-center justify-center shadow-sm overflow-hidden">
                         {item.logoUrl ? (
                           <Image
@@ -415,7 +420,8 @@ export default function WatchlistPage() {
                           {item.name ?? 'Watchlist item'}
                         </p>
                       </div>
-                    </div>
+                    </Link>
+                  </div>
                     <div className="flex items-center gap-4 ml-auto">
                       <div className="hidden sm:block">
                         {isLoadingRow ? (
