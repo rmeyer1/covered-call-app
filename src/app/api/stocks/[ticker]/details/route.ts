@@ -40,6 +40,19 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
     safeResolve(() => getMinuteBars(ticker, '1Min', 390), 'bars_intraday', warnings),
   ]);
 
+  if (!snapshot) {
+    warnings.push('snapshot unavailable: empty response');
+  }
+  if (!optionsSnapshots || Object.keys(optionsSnapshots).length === 0) {
+    warnings.push('volatility unavailable: no option snapshots returned');
+  }
+  if (!dailyBars || dailyBars.length === 0) {
+    warnings.push('bars_daily unavailable: empty response');
+  }
+  if (!intradayBars || intradayBars.length === 0) {
+    warnings.push('bars_intraday unavailable: empty response');
+  }
+
   const optionsSnapshot = pickOptionsSnapshot(optionsSnapshots);
   const details = buildStockDetails({
     symbol: ticker,

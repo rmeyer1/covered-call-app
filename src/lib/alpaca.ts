@@ -135,9 +135,10 @@ export async function getOptionsSnapshots(symbol: string): Promise<Record<string
 
 export function pickOptionsSnapshot(snapshots?: Record<string, AlpacaOptionsSnapshot>): AlpacaOptionsSnapshot | undefined {
   if (!snapshots) return undefined;
-  const keys = Object.keys(snapshots);
-  if (!keys.length) return undefined;
-  return snapshots[keys[0]];
+  const values = Object.values(snapshots);
+  if (!values.length) return undefined;
+  const withIv = values.find((snapshot) => typeof snapshot.impliedVolatility === 'number');
+  return withIv ?? values[0];
 }
 
 export async function getOptionsSnapshot(symbol: string): Promise<AlpacaOptionsSnapshot | undefined> {
