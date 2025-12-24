@@ -375,3 +375,22 @@ export interface StockDetails {
   warnings?: string[];
   isPartial?: boolean;
 }
+
+export interface WatchlistItemRow {
+  id: string;
+  user_id: string;
+  ticker: string;
+  position: number;
+  created_at: string;
+}
+
+export interface WatchlistItem {
+  id: string;
+  ticker: string;
+  position: number;
+  createdAt: string;
+}
+
+export interface WatchlistResponse {
+  items: WatchlistItem[];
+}
