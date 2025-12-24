@@ -58,6 +58,19 @@ export function mapWatchlistRows(rows: WatchlistItemRow[]): WatchlistItem[] {
   }));
 }
 
+export function mapWatchlistRowsWithLogo(
+  rows: WatchlistItemRow[],
+  logoMap: Record<string, string | null>
+): WatchlistItem[] {
+  return rows.map((row) => ({
+    id: row.id,
+    ticker: row.ticker,
+    position: row.position,
+    createdAt: row.created_at,
+    logoUrl: logoMap[row.ticker] ?? null,
+  }));
+}
+
 export async function validateTicker(ticker: string, req: NextRequest): Promise<boolean> {
   try {
     const url = new URL('/api/stocks/validate', req.url);

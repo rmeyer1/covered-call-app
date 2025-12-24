@@ -202,10 +202,21 @@ export default function WatchlistPage() {
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
               {items.map((item) => (
                 <div key={item.id} className="flex items-center justify-between px-4 sm:px-6 py-4">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-semibold flex items-center justify-center shadow-sm">
-                      {item.ticker[0]}
-                    </div>
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-semibold flex items-center justify-center shadow-sm overflow-hidden">
+                    {item.logoUrl ? (
+                      <Image
+                        src={item.logoUrl}
+                        alt={`${item.ticker} logo`}
+                        width={40}
+                        height={40}
+                        className="h-10 w-10 object-contain bg-white"
+                        unoptimized
+                      />
+                    ) : (
+                      item.ticker[0]
+                    )}
+                  </div>
                     <div>
                       <div className="font-semibold text-base">{item.ticker}</div>
                       <p className="text-xs text-gray-500 dark:text-gray-400">Watchlist item</p>

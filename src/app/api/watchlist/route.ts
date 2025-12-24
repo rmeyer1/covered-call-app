@@ -3,11 +3,12 @@ import { supabaseRestFetch } from '@/lib/supabase';
 import {
   MAX_WATCHLIST_ITEMS,
   fetchWatchlistRows,
-  mapWatchlistRows,
+  mapWatchlistRowsWithLogo,
   normalizeTicker,
   resolveUserId,
   validateTicker,
 } from './helpers';
+import { getLogoUrl } from '@/lib/alpaca';
 
 export async function GET(req: NextRequest) {
   try {
@@ -17,7 +18,14 @@ export async function GET(req: NextRequest) {
     }
 
     const rows = await fetchWatchlistRows(userId);
-    return NextResponse.json({ items: mapWatchlistRows(rows) });
+    const logoEntries = await Promise.all(
+      rows.map(async (row) => [row.ticker, await getLogoUrl(row.ticker)] as const)
+    );
+    const logoMap = logoEntries.reduce<Record<string, string | null>>((acc, [ticker, logoUrl]) => {
+      acc[ticker] = logoUrl;
+      return acc;
+    }, {});
+    return NextResponse.json({ items: mapWatchlistRowsWithLogo(rows, logoMap) });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to load watchlist';
     return NextResponse.json({ error: message }, { status: 500 });
@@ -66,7 +74,14 @@ export async function POST(req: NextRequest) {
     });
 
     const rows = await fetchWatchlistRows(userId);
-    return NextResponse.json({ items: mapWatchlistRows(rows) });
+    const logoEntries = await Promise.all(
+      rows.map(async (row) => [row.ticker, await getLogoUrl(row.ticker)] as const)
+    );
+    const logoMap = logoEntries.reduce<Record<string, string | null>>((acc, [ticker, logoUrl]) => {
+      acc[ticker] = logoUrl;
+      return acc;
+    }, {});
+    return NextResponse.json({ items: mapWatchlistRowsWithLogo(rows, logoMap) });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Failed to update watchlist';
     return NextResponse.json({ error: message }, { status: 500 });
