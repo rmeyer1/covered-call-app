@@ -48,7 +48,8 @@ async function get<T>(url: string, params?: Record<string, unknown>): Promise<T>
 
 export async function getStockSnapshot(symbol: string) {
   const data = await get<{ snapshot: AlpacaStockSnapshot }>(
-    `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/snapshot`
+    `${ALPACA_DATA_BASE_V2}/stocks/${encodeURIComponent(symbol)}/snapshot`,
+    { feed: 'iex' }
   );
   return data?.snapshot;
 }
