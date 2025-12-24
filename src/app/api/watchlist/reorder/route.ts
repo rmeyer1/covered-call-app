@@ -70,7 +70,7 @@ export async function PATCH(req: NextRequest) {
       position: index,
     }));
 
-    await supabaseRestFetch('/rest/v1/watchlist_items', {
+    await supabaseRestFetch('/rest/v1/watchlist_items?on_conflict=user_id,ticker', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
