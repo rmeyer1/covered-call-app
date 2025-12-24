@@ -73,6 +73,12 @@ export async function getAsset(symbol: string): Promise<AlpacaAsset | null> {
   return get<AlpacaAsset>(`${ALPACA_TRADING_BASE}/v2/assets/${encodeURIComponent(trimmed)}`);
 }
 
+export async function getAsset(symbol: string): Promise<AlpacaAsset | null> {
+  const trimmed = symbol.trim().toUpperCase();
+  if (!trimmed) return null;
+  return get<AlpacaAsset>(`${ALPACA_TRADING_BASE}/v2/assets/${encodeURIComponent(trimmed)}`);
+}
+
 export async function getDailyBars(symbol: string, limit = 252) {
   const bars: AlpacaBar[] = [];
   let nextPageToken: string | null | undefined;
