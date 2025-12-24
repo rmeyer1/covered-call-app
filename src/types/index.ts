@@ -309,6 +309,7 @@ export interface StockDetailsSummary {
   change: number | null;
   changePercent: number | null;
   lastTradeTime?: string | null;
+  sparkline?: number[];
   dayRange?: StockValueRange;
   fiftyTwoWeekRange?: StockValueRangePosition;
   volume?: StockVolumeSnapshot;
@@ -390,6 +391,7 @@ export interface WatchlistItem {
   position: number;
   createdAt: string;
   logoUrl?: string | null;
+  name?: string | null;
 }
 
 export interface WatchlistResponse {

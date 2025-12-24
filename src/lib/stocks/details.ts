@@ -40,6 +40,11 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
   const latestPrice = snapshot?.latestTrade?.p ?? snapshot?.minuteBar?.c ?? snapshot?.dailyBar?.c ?? null;
   const previousClose = snapshot?.prevDailyBar?.c ?? null;
   const changeData = calcChange(latestPrice, previousClose);
+  const sparkline = [...bars]
+    .slice(0, 20)
+    .reverse()
+    .map((bar) => bar.c)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
 
   return {
     lastPrice: latestPrice ?? null,
@@ -47,6 +52,7 @@ function buildSummary(snapshot: AlpacaStockSnapshot | undefined, bars: AlpacaBar
     change: changeData.change,
     changePercent: changeData.changePercent,
     lastTradeTime: snapshot?.latestTrade?.t ?? null,
+    sparkline: sparkline.length ? sparkline : undefined,
     dayRange: snapshot?.dailyBar
       ? {
           low: snapshot.dailyBar.l,
@@ -164,4 +170,3 @@ export function buildStockDetails({
     isPartial: warnings.length > 0,
   };
 }
-
