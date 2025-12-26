@@ -140,6 +140,27 @@ function calculateAverageVolume(bars: AlpacaBar[], window = 30) {
   return total / slice.length;
 }
 
+function calculateHistoricalVolatility(bars: AlpacaBar[], window = 30) {
+  if (!bars.length) return null;
+  const sorted = sortBarsByTime(bars, 'asc');
+  const closes = sorted.map((bar) => bar.c).filter((value) => Number.isFinite(value));
+  if (closes.length < window + 1) return null;
+  const recent = closes.slice(-1 * (window + 1));
+  const returns: number[] = [];
+  for (let i = 1; i < recent.length; i += 1) {
+    const prev = recent[i - 1];
+    const curr = recent[i];
+    if (prev <= 0 || curr <= 0) continue;
+    returns.push(Math.log(curr / prev));
+  }
+  if (returns.length < 2) return null;
+  const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+  const variance =
+    returns.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / Math.max(1, returns.length - 1);
+  const dailyVol = Math.sqrt(variance);
+  return dailyVol * Math.sqrt(252);
+}
+
 function determineMarketStatus(snapshot: AlpacaStockSnapshot | undefined) {
   if (!snapshot?.latestTrade?.t) return undefined;
   const tradeTime = new Date(snapshot.latestTrade.t).getUTCHours();
@@ -207,6 +228,9 @@ export function buildStockDetails({
 
   const summary = buildSummary(snapshot, bars, intradayBars);
   const volatility = buildVolatility(optionsSnapshot);
+  if (volatility && !volatility.historicalVolatility) {
+    volatility.historicalVolatility = calculateHistoricalVolatility(bars, 30);
+  }
   const fundamentalsSection = buildFundamentals();
   const mappedNews = mapNews(news);
 
