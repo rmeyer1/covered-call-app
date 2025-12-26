@@ -4,12 +4,14 @@ import {
   getDailyBars,
   getMinuteBars,
   getNews,
+  getOptionChainByTypePage,
   getOptionsSnapshots,
   getStockSnapshot,
   pickOptionsSnapshot,
 } from '@/lib/alpaca';
 import { buildStockDetails } from '@/lib/stocks/details';
 import { logError } from '@/lib/logger';
+import type { OptionContract } from '@/lib/options';
 
 export const revalidate = 60;
 
@@ -55,7 +57,7 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
   }
 
   const aggregatedVolatility = aggregateOptionsSnapshots(optionsSnapshots);
-  const optionsSnapshot = aggregatedVolatility ?? pickOptionsSnapshot(optionsSnapshots);
+  let optionsSnapshot = aggregatedVolatility ?? pickOptionsSnapshot(optionsSnapshots);
   if (
     optionsSnapshot &&
     optionsSnapshot.impliedVolatility === undefined &&
@@ -65,6 +67,30 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
     optionsSnapshot.impliedVolatilityRank === undefined
   ) {
     warnings.push('volatility unavailable: option snapshots missing IV fields');
+    optionsSnapshot = undefined;
+  }
+
+  if (!optionsSnapshot) {
+    const [callChain, putChain] = await Promise.all([
+      safeResolve(() => getOptionChainByTypePage(ticker, 'call', 200), 'volatility_calls', warnings),
+      safeResolve(() => getOptionChainByTypePage(ticker, 'put', 200), 'volatility_puts', warnings),
+    ]);
+
+    const ivStats = deriveIvStats([...(callChain ?? []), ...(putChain ?? [])]);
+    if (ivStats) {
+      optionsSnapshot = {
+        symbol: ticker,
+        impliedVolatility: ivStats.iv,
+        impliedVolatilityLow: ivStats.ivLow,
+        impliedVolatilityHigh: ivStats.ivHigh,
+        impliedVolatilityPercentile: null,
+        impliedVolatilityRank: null,
+        historicalVolatility: null,
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      warnings.push('volatility unavailable: option chain missing IV values');
+    }
   }
   const details = buildStockDetails({
     symbol: ticker,
@@ -81,4 +107,19 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
       'Cache-Control': 's-maxage=60, stale-while-revalidate=300',
     },
   });
+}
+
+function deriveIvStats(contracts: OptionContract[]) {
+  const ivs = contracts
+    .map((contract) => contract.impliedVolatility)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (!ivs.length) return null;
+  const sorted = [...ivs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const iv = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  return {
+    iv,
+    ivLow: sorted[0],
+    ivHigh: sorted[sorted.length - 1],
+  };
 }

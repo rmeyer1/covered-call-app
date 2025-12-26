@@ -312,6 +312,39 @@ export async function getOptionChainByType(ticker: string, type: 'call' | 'put')
   return allSnapshots;
 }
 
+export async function getOptionChainByTypePage(
+  ticker: string,
+  type: 'call' | 'put',
+  limit = 250
+): Promise<OptionContract[]> {
+  const params = new URLSearchParams({ type, limit: String(limit) });
+  let res;
+  try {
+    const { keyId, secretKey } = getAlpacaAuth();
+    res = await axios.get(`${ALPACA_DATA_BASE_V1BETA1}/options/snapshots/${ticker}`, {
+      headers: {
+        'Apca-Api-Key-Id': keyId,
+        'Apca-Api-Secret-Key': secretKey,
+      },
+      params,
+    });
+  } catch (err) {
+    logAxiosError(err, 'alpaca.getOptionChainPage');
+    throw err;
+  }
+
+  const snapshots = res?.data?.snapshots as Record<string, OptionContract | Record<string, unknown>> | undefined;
+  if (!snapshots || Object.keys(snapshots).length === 0) {
+    logWarn('alpaca.getOptionChainPage: no snapshots', {
+      ticker,
+      hasData: !!res?.data,
+      keys: res?.data ? Object.keys(res.data) : [],
+    });
+    return [];
+  }
+  return mapSnapshotsWithStrike(snapshots);
+}
+
 export async function getUnderlyingPrice(ticker: string) {
   try {
     const { keyId, secretKey } = getAlpacaAuth();
