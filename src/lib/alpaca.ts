@@ -139,14 +139,24 @@ export async function getOptionsSnapshots(symbol: string): Promise<Record<string
 }
 
 function normalizeOptionsSnapshot(raw: Record<string, unknown>): AlpacaOptionsSnapshot {
-  const normalizeNumber = (value: unknown) =>
-    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const normalizeNumber = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+  const greeks = typeof raw.greeks === 'object' && raw.greeks ? (raw.greeks as Record<string, unknown>) : undefined;
   return {
     symbol: typeof raw.symbol === 'string' ? raw.symbol : '',
     impliedVolatility:
       normalizeNumber(raw.impliedVolatility) ??
       normalizeNumber(raw.implied_volatility) ??
-      normalizeNumber(raw.iv),
+      normalizeNumber(raw.iv) ??
+      normalizeNumber(greeks?.iv) ??
+      normalizeNumber(greeks?.impliedVolatility) ??
+      normalizeNumber(greeks?.implied_volatility),
     impliedVolatilityLow:
       normalizeNumber(raw.impliedVolatilityLow) ?? normalizeNumber(raw.iv_low) ?? normalizeNumber(raw.ivLow),
     impliedVolatilityHigh:
@@ -174,6 +184,60 @@ export function pickOptionsSnapshot(snapshots?: Record<string, AlpacaOptionsSnap
       typeof snapshot.impliedVolatilityRank === 'number'
   );
   return withIv ?? values[0];
+}
+
+export function aggregateOptionsSnapshots(
+  snapshots?: Record<string, AlpacaOptionsSnapshot>
+): AlpacaOptionsSnapshot | undefined {
+  if (!snapshots) return undefined;
+  const values = Object.values(snapshots);
+  if (!values.length) return undefined;
+  const collect = (key: keyof AlpacaOptionsSnapshot) =>
+    values
+      .map((value) => value[key])
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+
+  const median = (nums: number[]) => {
+    if (!nums.length) return undefined;
+    const sorted = [...nums].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+  };
+
+  const impliedVolatility = median(collect('impliedVolatility'));
+  const impliedVolatilityLow = median(collect('impliedVolatilityLow'));
+  const impliedVolatilityHigh = median(collect('impliedVolatilityHigh'));
+  const impliedVolatilityPercentile = median(collect('impliedVolatilityPercentile'));
+  const impliedVolatilityRank = median(collect('impliedVolatilityRank'));
+  const historicalVolatility = median(collect('historicalVolatility'));
+  const updatedAt =
+    values
+      .map((value) => value.updatedAt)
+      .filter((value): value is string => typeof value === 'string')
+      .sort()
+      .pop() ?? undefined;
+
+  if (
+    impliedVolatility === undefined &&
+    impliedVolatilityLow === undefined &&
+    impliedVolatilityHigh === undefined &&
+    impliedVolatilityPercentile === undefined &&
+    impliedVolatilityRank === undefined &&
+    historicalVolatility === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    symbol: '',
+    impliedVolatility,
+    impliedVolatilityLow,
+    impliedVolatilityHigh,
+    impliedVolatilityPercentile,
+    impliedVolatilityRank,
+    historicalVolatility,
+    updatedAt,
+  };
 }
 
 export async function getOptionsSnapshot(symbol: string): Promise<AlpacaOptionsSnapshot | undefined> {

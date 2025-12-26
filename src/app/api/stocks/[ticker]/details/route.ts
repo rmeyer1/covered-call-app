@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  aggregateOptionsSnapshots,
   getDailyBars,
   getMinuteBars,
   getNews,
@@ -53,7 +54,8 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
     warnings.push('bars_intraday unavailable: empty response');
   }
 
-  const optionsSnapshot = pickOptionsSnapshot(optionsSnapshots);
+  const aggregatedVolatility = aggregateOptionsSnapshots(optionsSnapshots);
+  const optionsSnapshot = aggregatedVolatility ?? pickOptionsSnapshot(optionsSnapshots);
   if (
     optionsSnapshot &&
     optionsSnapshot.impliedVolatility === undefined &&
