@@ -127,18 +127,52 @@ export async function getOptionsSnapshots(symbol: string): Promise<Record<string
     const response = await get<AlpacaOptionsSnapshotResponse>(
       `${ALPACA_DATA_BASE_V1BETA1}/options/snapshots/${encodeURIComponent(symbol)}`
     );
-    return response?.snapshots ?? undefined;
+    const snapshots = response?.snapshots ?? undefined;
+    if (!snapshots) return undefined;
+    return Object.fromEntries(
+      Object.entries(snapshots).map(([key, value]) => [key, normalizeOptionsSnapshot(value as Record<string, unknown>)])
+    );
   } catch (err) {
     logAxiosError(err, 'alpaca.getOptionsSnapshots');
     return undefined;
   }
 }
 
+function normalizeOptionsSnapshot(raw: Record<string, unknown>): AlpacaOptionsSnapshot {
+  const normalizeNumber = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  return {
+    symbol: typeof raw.symbol === 'string' ? raw.symbol : '',
+    impliedVolatility:
+      normalizeNumber(raw.impliedVolatility) ??
+      normalizeNumber(raw.implied_volatility) ??
+      normalizeNumber(raw.iv),
+    impliedVolatilityLow:
+      normalizeNumber(raw.impliedVolatilityLow) ?? normalizeNumber(raw.iv_low) ?? normalizeNumber(raw.ivLow),
+    impliedVolatilityHigh:
+      normalizeNumber(raw.impliedVolatilityHigh) ?? normalizeNumber(raw.iv_high) ?? normalizeNumber(raw.ivHigh),
+    impliedVolatilityPercentile:
+      normalizeNumber(raw.ivPercentile) ?? normalizeNumber(raw.iv_percentile) ?? normalizeNumber(raw.iv_percentile_rank),
+    impliedVolatilityRank:
+      normalizeNumber(raw.ivRank) ?? normalizeNumber(raw.iv_rank) ?? normalizeNumber(raw.iv_rank_percentile),
+    historicalVolatility:
+      normalizeNumber(raw.historicalVolatility) ?? normalizeNumber(raw.historical_volatility),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  };
+}
+
 export function pickOptionsSnapshot(snapshots?: Record<string, AlpacaOptionsSnapshot>): AlpacaOptionsSnapshot | undefined {
   if (!snapshots) return undefined;
   const values = Object.values(snapshots);
   if (!values.length) return undefined;
-  const withIv = values.find((snapshot) => typeof snapshot.impliedVolatility === 'number');
+  const withIv = values.find(
+    (snapshot) =>
+      typeof snapshot.impliedVolatility === 'number' ||
+      typeof snapshot.impliedVolatilityLow === 'number' ||
+      typeof snapshot.impliedVolatilityHigh === 'number' ||
+      typeof snapshot.impliedVolatilityPercentile === 'number' ||
+      typeof snapshot.impliedVolatilityRank === 'number'
+  );
   return withIv ?? values[0];
 }
 

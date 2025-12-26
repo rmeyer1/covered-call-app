@@ -54,6 +54,16 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ ticker
   }
 
   const optionsSnapshot = pickOptionsSnapshot(optionsSnapshots);
+  if (
+    optionsSnapshot &&
+    optionsSnapshot.impliedVolatility === undefined &&
+    optionsSnapshot.impliedVolatilityLow === undefined &&
+    optionsSnapshot.impliedVolatilityHigh === undefined &&
+    optionsSnapshot.impliedVolatilityPercentile === undefined &&
+    optionsSnapshot.impliedVolatilityRank === undefined
+  ) {
+    warnings.push('volatility unavailable: option snapshots missing IV fields');
+  }
   const details = buildStockDetails({
     symbol: ticker,
     snapshot,
