@@ -82,6 +82,7 @@ export async function getDailyBars(symbol: string, limit = 252) {
     const params: Record<string, unknown> = {
       timeframe: '1Day',
       limit,
+      feed: 'iex',
     };
     if (nextPageToken) params.page_token = nextPageToken;
 
@@ -106,6 +107,7 @@ export async function getMinuteBars(symbol: string, timeframe: '1Min' | '5Min' |
     const params: Record<string, unknown> = {
       timeframe,
       limit,
+      feed: 'iex',
     };
     if (nextPageToken) params.page_token = nextPageToken;
 
